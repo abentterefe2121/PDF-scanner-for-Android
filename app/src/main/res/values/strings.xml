@@ -24,7 +24,11 @@
     <string name="copy_text">Copy Text</string>
     <string name="copied">Text copied</string>
     <string name="rename">Rename</string>
+    <string name="duplicate">Duplicate</string>
     <string name="move_folder">Move to Folder</string>
+    <string name="save_document">Save Document</string>
+    <string name="document_title">Document Title</string>
+    <string name="folder">Folder</string>
     <string name="more">More</string>
     <string name="settings">Settings</string>
     <string name="extracted_text">Extracted Text (OCR)</string>

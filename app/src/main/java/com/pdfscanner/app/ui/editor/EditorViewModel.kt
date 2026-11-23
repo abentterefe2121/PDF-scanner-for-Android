@@ -130,8 +130,13 @@ class EditorViewModel @Inject constructor(
         _pagesVersion.value += 1
     }
 
+    fun defaultDocumentTitle(): String {
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
+        return "Scan $stamp"
+    }
+
     /** Generate searchable PDF + OCR + save to Room. Runs on Default/IO. */
-    fun createPdf() {
+    fun createPdf(customTitle: String? = null, folder: String = "Inbox") {
         if (ScanSession.paths.isEmpty() || _isBusy.value) return
         viewModelScope.launch {
             _isBusy.value = true
@@ -145,7 +150,7 @@ class EditorViewModel @Inject constructor(
                 for ((i, path) in paths.withIndex()) {
                     _status.value = "OCR page ${i + 1}/${paths.size}…"
                     val bmp = withContext(Dispatchers.Default) {
-                        android.graphics.BitmapFactory.decodeFile(path)
+                        BitmapUtils.decodeSampledFile(path, deviceTier.maxProcessingEdge)
                     } ?: continue
                     val result = withContext(Dispatchers.Default) { ocr.recognize(bmp) }
                     if (result.text.isNotBlank()) {
@@ -157,7 +162,7 @@ class EditorViewModel @Inject constructor(
                 _status.value = "Building searchable PDF…"
                 val pdfDir = File(context.filesDir, "pdfs").apply { mkdirs() }
                 val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                val title = "Scan $stamp"
+                val title = customTitle?.trim()?.takeIf { it.isNotEmpty() } ?: defaultDocumentTitle()
                 val pdfFile = File(pdfDir, "scan_$stamp.pdf")
                 val generated = withContext(Dispatchers.Default) {
                     pdfGenerator.generate(pages, pdfFile, title)
@@ -170,7 +175,8 @@ class EditorViewModel @Inject constructor(
                                 title = title,
                                 pdfPath = generated.absolutePath,
                                 pageCount = pages.size,
-                                ocrText = allText.toString().take(50_000)
+                                ocrText = allText.toString().take(50_000),
+                                folder = folder
                             )
                         )
                     }

@@ -38,7 +38,9 @@
         tools:layout="@layout/fragment_editor">
         <action
             android:id="@+id/action_editor_to_scanner"
-            app:destination="@id/scannerFragment" />
+            app:destination="@id/scannerFragment"
+            app:popUpTo="@id/scannerFragment"
+            app:popUpToInclusive="true" />
         <action
             android:id="@+id/action_editor_to_crop"
             app:destination="@id/cropFragment" />

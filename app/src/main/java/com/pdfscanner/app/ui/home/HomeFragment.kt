@@ -109,13 +109,15 @@ class HomeFragment : Fragment() {
         popup.menu.add(0, 1, 0, getString(R.string.share))
         popup.menu.add(0, 2, 1, getString(R.string.rename))
         popup.menu.add(0, 3, 2, getString(R.string.move_folder))
-        popup.menu.add(0, 4, 3, getString(R.string.delete))
+        popup.menu.add(0, 4, 3, getString(R.string.duplicate))
+        popup.menu.add(0, 5, 4, getString(R.string.delete))
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> sharePdf(File(doc.pdfPath))
                 2 -> showRenameDialog(doc)
                 3 -> showFolderDialog(doc)
-                4 -> showDeleteDialog(doc)
+                4 -> viewModel.duplicateDocument(doc)
+                5 -> showDeleteDialog(doc)
             }
             true
         }

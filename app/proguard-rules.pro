@@ -1,7 +1,8 @@
 # Keep OpenCV native bindings
 -keep class org.opencv.** { *; }
-# Keep Tesseract
--keep class com.googlecode.tesseract4android.** { *; }
+# Keep Tesseract & Leptonica JNI
+-keep class com.googlecode.tesseract.android.** { *; }
+-keep class com.googlecode.leptonica.android.** { *; }
 # Keep Room entities/DAOs
 -keep class androidx.room.** { *; }
 -keep class com.pdfscanner.app.core.db.** { *; }

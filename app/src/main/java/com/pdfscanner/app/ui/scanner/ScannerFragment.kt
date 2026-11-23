@@ -3,7 +3,7 @@ package com.pdfscanner.app.ui.scanner
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.graphics.PointF
 import android.net.Uri
 import android.os.Bundle
@@ -74,7 +74,9 @@ class ScannerFragment : Fragment() {
         binding.buttonCapture.setOnClickListener { capture() }
         binding.buttonGallery.setOnClickListener { galleryLauncher.launch("image/*") }
         binding.buttonFlash.setOnClickListener {
-            cameraManager.setTorch(!cameraManager.isTorchOn)
+            val next = !cameraManager.isTorchOn
+            cameraManager.setTorch(next)
+            updateTorchUi(next)
         }
         binding.buttonAutoToggle.setOnClickListener { viewModel.toggleAutoCapture() }
         binding.buttonBatchToggle.setOnClickListener { viewModel.toggleBatchMode() }
@@ -84,6 +86,7 @@ class ScannerFragment : Fragment() {
             }
         }
         updateBatchBadge()
+        updateTorchUi(false)
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -138,6 +141,11 @@ class ScannerFragment : Fragment() {
         }
     }
 
+    private fun updateTorchUi(on: Boolean) {
+        val color = if (on) ContextCompat.getColor(requireContext(), R.color.primary) else Color.WHITE
+        binding.buttonFlash.setColorFilter(color)
+    }
+
     private fun updateBatchBadge() {
         val count = ScanSession.pages.size
         if (count > 0) {
@@ -148,15 +156,24 @@ class ScannerFragment : Fragment() {
         }
     }
 
+    /**
+     * Maps analysis-frame quad coordinates to PreviewView (FILL_CENTER aspect-fill)
+     * so the live green quad aligns accurately on 20:9 tall phone displays.
+     */
     private fun updateOverlay(qr: ScannerViewModel.QuadResult?) {
         val overlay = binding.edgeOverlay
-        if (qr == null || overlay.width == 0 || qr.frameWidth <= 0 || qr.frameHeight <= 0) {
+        if (qr == null || overlay.width == 0 || overlay.height == 0 || qr.frameWidth <= 0 || qr.frameHeight <= 0) {
             overlay.quad = null
             return
         }
-        val scaleX = overlay.width.toFloat() / qr.frameWidth.toFloat()
-        val scaleY = overlay.height.toFloat() / qr.frameHeight.toFloat()
-        overlay.quad = qr.points.map { PointF(it.x * scaleX, it.y * scaleY) }.toTypedArray()
+        val vw = overlay.width.toFloat()
+        val vh = overlay.height.toFloat()
+        val fw = qr.frameWidth.toFloat()
+        val fh = qr.frameHeight.toFloat()
+        val scale = maxOf(vw / fw, vh / fh)
+        val dx = (vw - fw * scale) / 2f
+        val dy = (vh - fh * scale) / 2f
+        overlay.quad = qr.points.map { PointF(it.x * scale + dx, it.y * scale + dy) }.toTypedArray()
     }
 
     private fun startCamera() {
@@ -184,24 +201,18 @@ class ScannerFragment : Fragment() {
         val qr = lastQuadResult
         lifecycleScope.launch(Dispatchers.Default) {
             var raw: Bitmap? = null
-            var scaledRaw: Bitmap? = null
             var processed: Bitmap? = null
             try {
                 raw = cameraManager.takePicture()
-                scaledRaw = BitmapUtils.scaleToMaxEdge(raw, deviceTier.maxProcessingEdge)
-                if (scaledRaw !== raw) {
-                    BitmapUtils.safeRecycle(raw)
-                    raw = null
-                }
                 processed = viewModel.openCv.processPage(
-                    scaledRaw,
+                    raw,
                     viewModel.filter.value,
                     qr?.points,
                     qr?.frameWidth ?: 640,
                     qr?.frameHeight ?: 480
                 )
                 val dir = File(requireContext().cacheDir, "scans")
-                val rawPath = ScanSession.saveBitmap(dir, "raw", scaledRaw, 92)
+                val rawPath = ScanSession.saveBitmap(dir, "raw", raw, 92)
                 val procPath = ScanSession.saveBitmap(dir, "page", processed, deviceTier.jpegQuality)
                 withContext(Dispatchers.Main) {
                     isCapturing = false
@@ -236,7 +247,6 @@ class ScannerFragment : Fragment() {
                 }
             } finally {
                 BitmapUtils.safeRecycle(raw)
-                BitmapUtils.safeRecycle(scaledRaw)
                 BitmapUtils.safeRecycle(processed)
             }
         }
@@ -245,37 +255,34 @@ class ScannerFragment : Fragment() {
     private fun importFromGallery(uri: Uri) {
         lifecycleScope.launch(Dispatchers.Default) {
             var bmp: Bitmap? = null
-            var scaled: Bitmap? = null
             var processed: Bitmap? = null
             try {
-                bmp = requireContext().contentResolver.openInputStream(uri)?.use { input ->
-                    BitmapFactory.decodeStream(input)
-                } ?: return@launch
-                scaled = BitmapUtils.scaleToMaxEdge(bmp, deviceTier.maxProcessingEdge)
-                if (scaled !== bmp) {
-                    BitmapUtils.safeRecycle(bmp)
-                    bmp = null
-                }
-                val detected = viewModel.openCv.detectDocumentQuad(scaled)
+                bmp = BitmapUtils.decodeSampledUri(
+                    requireContext(),
+                    uri,
+                    deviceTier.maxProcessingEdge
+                ) ?: return@launch
+                val detected = viewModel.openCv.detectDocumentQuad(bmp)
                 processed = viewModel.openCv.processPage(
-                    scaled,
+                    bmp,
                     viewModel.filter.value,
                     detected,
-                    scaled.width,
-                    scaled.height
+                    bmp.width,
+                    bmp.height
                 )
                 val dir = File(requireContext().cacheDir, "scans")
-                val rawPath = ScanSession.saveBitmap(dir, "raw", scaled, 92)
+                val rawPath = ScanSession.saveBitmap(dir, "raw", bmp, 92)
                 val procPath = ScanSession.saveBitmap(dir, "page", processed, deviceTier.jpegQuality)
                 withContext(Dispatchers.Main) {
+                    if (_binding == null) return@withContext
                     if (rawPath != null && procPath != null) {
                         ScanSession.addPage(
                             ScanSession.PageEntry(
                                 rawPath = rawPath,
                                 processedPath = procPath,
                                 quad = detected,
-                                quadWidth = scaled.width,
-                                quadHeight = scaled.height
+                                quadWidth = bmp.width,
+                                quadHeight = bmp.height
                             )
                         )
                         updateBatchBadge()
@@ -286,11 +293,12 @@ class ScannerFragment : Fragment() {
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(requireContext(), "Import failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    if (_binding != null) {
+                        Toast.makeText(requireContext(), "Import failed: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } finally {
                 BitmapUtils.safeRecycle(bmp)
-                BitmapUtils.safeRecycle(scaled)
                 BitmapUtils.safeRecycle(processed)
             }
         }

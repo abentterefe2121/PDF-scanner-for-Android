@@ -24,7 +24,11 @@
     <string name="copy_text">ጽሑፍ ቅዳ</string>
     <string name="copied">ጽሑፍ ተቀድቷል</string>
     <string name="rename">ስም ቀይር</string>
+    <string name="duplicate">ቅጂ ፍጠር</string>
     <string name="move_folder">ወደ አቃፊ አዛውር</string>
+    <string name="save_document">ሰነድ አስቀምጥ</string>
+    <string name="document_title">የሰነድ ርዕስ</string>
+    <string name="folder">አቃፊ</string>
     <string name="more">ተጨማሪ</string>
     <string name="settings">ቅንብሮች</string>
     <string name="extracted_text">የተነበበ ጽሑፍ (OCR)</string>

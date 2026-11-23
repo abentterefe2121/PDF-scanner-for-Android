@@ -1,5 +1,7 @@
 package com.pdfscanner.app.ui.home
 
+import android.graphics.Bitmap
+import android.util.LruCache
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -9,6 +11,7 @@ import com.pdfscanner.app.core.pdf.PdfViewer
 import com.pdfscanner.app.databinding.ItemDocumentBinding
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -25,6 +28,11 @@ class DocumentAdapter(
     private var items: List<DocumentEntity> = emptyList()
     private val dateFmt = SimpleDateFormat("dd MMM yyyy", Locale.getDefault())
     private val scope = CoroutineScope(Dispatchers.Main)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val thumbDispatcher = Dispatchers.Default.limitedParallelism(2)
+
+    private val thumbCache = object : LruCache<String, Bitmap>(24) {}
 
     fun submit(list: List<DocumentEntity>) {
         items = list
@@ -49,15 +57,22 @@ class DocumentAdapter(
             binding.textTitle.text = doc.title
             binding.textMeta.text = "${doc.folder} • ${dateFmt.format(Date(doc.createdAt))}"
             binding.textPageBadge.text = "${doc.pageCount}p"
-            binding.imageThumb.setImageDrawable(null)
             binding.imageThumb.tag = doc.pdfPath
             thumbJob?.cancel()
-            thumbJob = scope.launch {
-                val bmp = withContext(Dispatchers.Default) {
-                    PdfViewer.renderPage(File(doc.pdfPath), 0, 360, 480)
-                }
-                if (binding.imageThumb.tag == doc.pdfPath && bmp != null) {
-                    binding.imageThumb.setImageBitmap(bmp)
+
+            val cached = thumbCache.get(doc.pdfPath)
+            if (cached != null && !cached.isRecycled) {
+                binding.imageThumb.setImageBitmap(cached)
+            } else {
+                binding.imageThumb.setImageDrawable(null)
+                thumbJob = scope.launch {
+                    val bmp = withContext(thumbDispatcher) {
+                        PdfViewer.renderPage(File(doc.pdfPath), 0, 360, 480)
+                    }
+                    if (bmp != null) thumbCache.put(doc.pdfPath, bmp)
+                    if (binding.imageThumb.tag == doc.pdfPath && bmp != null) {
+                        binding.imageThumb.setImageBitmap(bmp)
+                    }
                 }
             }
             binding.root.setOnClickListener { onClick(doc) }

@@ -33,23 +33,34 @@ class TesseractOcrEngine @Inject constructor(
     fun arePacksDownloaded(): Boolean {
         val amh = File(tessDataDir, "amh.traineddata")
         val eng = File(tessDataDir, "eng.traineddata")
-        return amh.exists() && eng.exists()
+        return amh.exists() && amh.length() > 100_000 && eng.exists() && eng.length() > 100_000
     }
 
-    override fun isAvailable(): Boolean = arePacksDownloaded()
+    private fun availableLangSpec(): String? {
+        val amhOk = File(tessDataDir, "amh.traineddata").let { it.exists() && it.length() > 100_000 }
+        val engOk = File(tessDataDir, "eng.traineddata").let { it.exists() && it.length() > 100_000 }
+        return when {
+            amhOk && engOk -> "amh+eng"
+            amhOk -> "amh"
+            engOk -> "eng"
+            else -> null
+        }
+    }
+
+    override fun isAvailable(): Boolean = availableLangSpec() != null
 
     override suspend fun recognize(bitmap: Bitmap): OcrResult {
-        if (!arePacksDownloaded()) {
+        val langSpec = availableLangSpec()
+        if (langSpec == null) {
             Log.w(TAG, "Tessdata not downloaded yet — returning empty (offline OCR pending download)")
             return OcrResult(text = "", confidence = 0f, language = "amh+eng", isOnline = false)
         }
         var api: TessBaseAPI? = null
         return try {
             api = TessBaseAPI()
-            // Tesseract expects the parent directory containing tessdata/.
-            val ok = api.init(context.filesDir.absolutePath, "amh+eng")
+            val ok = api.init(context.filesDir.absolutePath, langSpec)
             if (!ok) {
-                return OcrResult("", 0f, "amh+eng", false)
+                return OcrResult("", 0f, langSpec, false)
             }
             api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
             api.setVariable("preserve_interword_spaces", "1")
@@ -59,12 +70,12 @@ class TesseractOcrEngine @Inject constructor(
             OcrResult(
                 text = normalized,
                 confidence = if (normalized.isNotEmpty()) 0.85f else 0f,
-                language = "amh+eng",
+                language = langSpec,
                 isOnline = false
             )
         } catch (e: Exception) {
             Log.e(TAG, "Tesseract failed", e)
-            OcrResult("", 0f, "amh+eng", false)
+            OcrResult("", 0f, langSpec, false)
         } finally {
             try { api?.recycle() } catch (_: Exception) {}
         }

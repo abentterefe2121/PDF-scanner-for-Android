@@ -4,6 +4,11 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.Spinner
+import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -13,7 +18,9 @@ import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pdfscanner.app.R
+import com.pdfscanner.app.core.common.ScanSession
 import com.pdfscanner.app.core.vision.OpenCvHelper
 import com.pdfscanner.app.databinding.FragmentEditorBinding
 import dagger.hilt.android.AndroidEntryPoint
@@ -81,7 +88,8 @@ class EditorFragment : Fragment() {
         binding.buttonAddPage.setOnClickListener {
             findNavController().navigate(R.id.action_editor_to_scanner)
         }
-        binding.buttonDone.setOnClickListener { viewModel.createPdf() }
+        binding.buttonDone.setOnClickListener { showSaveDialog() }
+        updateButtons()
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -107,13 +115,13 @@ class EditorFragment : Fragment() {
                 launch {
                     viewModel.pagesVersion.collect {
                         adapter.notifyDataSetChanged()
+                        updateButtons()
                     }
                 }
                 launch {
                     viewModel.isBusy.collect { busy ->
                         binding.cardProgress.visibility = if (busy) View.VISIBLE else View.GONE
-                        binding.buttonDone.isEnabled = !busy
-                        binding.buttonAddPage.isEnabled = !busy
+                        updateButtons()
                     }
                 }
                 launch {
@@ -127,9 +135,52 @@ class EditorFragment : Fragment() {
         }
     }
 
+    private fun updateButtons() {
+        val hasPages = ScanSession.paths.isNotEmpty()
+        val busy = viewModel.isBusy.value
+        binding.buttonDone.isEnabled = hasPages && !busy
+        binding.buttonAddPage.isEnabled = !busy
+    }
+
+    private fun showSaveDialog() {
+        if (ScanSession.paths.isEmpty()) return
+        val ctx = requireContext()
+        val pad = (20 * resources.displayMetrics.density).toInt()
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val titleLabel = TextView(ctx).apply { text = getString(R.string.document_title) }
+        val titleInput = EditText(ctx).apply { setText(viewModel.defaultDocumentTitle()) }
+        val folderLabel = TextView(ctx).apply {
+            text = getString(R.string.folder)
+            setPadding(0, pad / 2, 0, 4)
+        }
+        val folders = arrayOf("Inbox", "IDs", "Receipts", "School")
+        val folderSpinner = Spinner(ctx).apply {
+            adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, folders)
+        }
+        container.addView(titleLabel)
+        container.addView(titleInput)
+        container.addView(folderLabel)
+        container.addView(folderSpinner)
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.save_document)
+            .setView(container)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val title = titleInput.text.toString()
+                val folder = folders[folderSpinner.selectedItemPosition]
+                viewModel.createPdf(title, folder)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
     override fun onResume() {
         super.onResume()
         adapter.notifyDataSetChanged()
+        updateButtons()
     }
 
     override fun onDestroyView() {

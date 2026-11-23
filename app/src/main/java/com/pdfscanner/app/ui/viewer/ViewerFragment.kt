@@ -12,6 +12,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.PopupMenu
 import android.widget.Toast
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
@@ -65,7 +66,7 @@ class ViewerFragment : Fragment() {
                     return@repeatOnLifecycle
                 }
                 currentDoc = doc
-                requireActivity().title = doc.title
+                (requireActivity() as? AppCompatActivity)?.supportActionBar?.title = doc.title
                 val file = File(doc.pdfPath)
                 pdfFile = file
                 totalPages = maxOf(withContext(Dispatchers.Default) { PdfViewer.pageCount(file) }, 1)
@@ -124,7 +125,7 @@ class ViewerFragment : Fragment() {
                                     dao.rename(doc.id, newTitle)
                                     withContext(Dispatchers.Main) {
                                         currentDoc = currentDoc?.copy(title = newTitle)
-                                        requireActivity().title = newTitle
+                                        (requireActivity() as? AppCompatActivity)?.supportActionBar?.title = newTitle
                                     }
                                 }
                             }

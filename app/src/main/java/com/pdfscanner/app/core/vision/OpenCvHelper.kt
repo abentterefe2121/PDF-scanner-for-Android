@@ -19,12 +19,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.hypot
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * OpenCV 4.14.0 helper — lazy-loaded ONLY when Scanner/Editor opens.
- * Real pipeline: downscale -> gray -> blur -> Canny -> contours -> quad -> warp -> enhance.
- * Computes real destination width/height from quad edge lengths so cropped pages keep true aspect ratio.
- * Ethiopic tuning: larger adaptive block (51) so dense fidel strokes survive cleanly.
+ * - Live edge detection checks top contours for a clean 4-corner document quad.
+ * - Perspective warp preserves true quad aspect ratio and caps output at maxProcessingEdge.
+ * - Filters:
+ *   - ORIGINAL: clean warped document
+ *   - MAGIC: true color document enhancement (YCrCb CLAHE + luminance contrast & mild sharpen; preserves stamps/ink!)
+ *   - LIGHTEN: shadow-removal background division
+ *   - BLACK_WHITE: adaptive Gaussian threshold (block=51) tuned for dense Ethiopic fidel strokes
  */
 @Singleton
 class OpenCvHelper @Inject constructor(
@@ -60,8 +65,6 @@ class OpenCvHelper @Inject constructor(
         var gray: Mat? = null
         var blurred: Mat? = null
         var edges: Mat? = null
-        var best2f: MatOfPoint2f? = null
-        var approx: MatOfPoint2f? = null
         val contours = mutableListOf<MatOfPoint>()
         var tempCopy: Bitmap? = null
         return try {
@@ -77,36 +80,39 @@ class OpenCvHelper @Inject constructor(
             blurred = Mat()
             Imgproc.GaussianBlur(gray, blurred, Size(5.0, 5.0), 0.0)
             edges = Mat()
-            Imgproc.Canny(blurred, edges, 75.0, 200.0)
+            Imgproc.Canny(blurred, edges, 65.0, 180.0)
 
             val hierarchy = Mat()
             Imgproc.findContours(edges, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
             hierarchy.release()
 
-            var best: MatOfPoint? = null
-            var bestArea = 0.0
-            for (c in contours) {
-                val area = Imgproc.contourArea(c)
-                if (area > bestArea) {
-                    bestArea = area
-                    best = c
+            val minArea = frame.width * frame.height * 0.08
+            val candidates = contours
+                .map { it to Imgproc.contourArea(it) }
+                .filter { it.second >= minArea }
+                .sortedByDescending { it.second }
+                .take(4)
+
+            for ((contour, _) in candidates) {
+                val c2f = MatOfPoint2f(*contour.toArray())
+                val approx = MatOfPoint2f()
+                try {
+                    val peri = Imgproc.arcLength(c2f, true)
+                    Imgproc.approxPolyDP(c2f, approx, 0.02 * peri, true)
+                    if (approx.rows() == 4) {
+                        val pts = approx.toArray()
+                        val sorted = pts.sortedWith(compareBy<Point>({ it.y }, { it.x }))
+                        val top = sorted.take(2).sortedBy { it.x }
+                        val bottom = sorted.takeLast(2).sortedBy { it.x }
+                        val ordered = arrayOf(top[0], top[1], bottom[1], bottom[0])
+                        return ordered.map { PointF(it.x.toFloat(), it.y.toFloat()) }.toTypedArray()
+                    }
+                } finally {
+                    c2f.release()
+                    approx.release()
                 }
             }
-            val minArea = frame.width * frame.height * 0.08
-            if (best == null || bestArea < minArea) return null
-
-            best2f = MatOfPoint2f(*best.toArray())
-            approx = MatOfPoint2f()
-            val peri = Imgproc.arcLength(best2f, true)
-            Imgproc.approxPolyDP(best2f, approx, 0.02 * peri, true)
-            if (approx.rows() != 4) return null
-
-            val pts = approx.toArray()
-            val sorted = pts.sortedWith(compareBy<Point>({ it.y }, { it.x }))
-            val top = sorted.take(2).sortedBy { it.x }
-            val bottom = sorted.takeLast(2).sortedBy { it.x }
-            val ordered = arrayOf(top[0], top[1], bottom[1], bottom[0])
-            ordered.map { PointF(it.x.toFloat(), it.y.toFloat()) }.toTypedArray()
+            null
         } catch (e: Exception) {
             Log.w(TAG, "detect failed: ${e.message}")
             null
@@ -115,8 +121,6 @@ class OpenCvHelper @Inject constructor(
             try { gray?.release() } catch (_: Exception) {}
             try { blurred?.release() } catch (_: Exception) {}
             try { edges?.release() } catch (_: Exception) {}
-            try { best2f?.release() } catch (_: Exception) {}
-            try { approx?.release() } catch (_: Exception) {}
             for (c in contours) try { c.release() } catch (_: Exception) {}
             try { tempCopy?.recycle() } catch (_: Exception) {}
         }
@@ -179,8 +183,15 @@ class OpenCvHelper @Inject constructor(
                 val heightLeft = hypot(p3.x - p0.x, p3.y - p0.y)
                 val heightRight = hypot(p2.x - p1.x, p2.y - p1.y)
 
-                val w = max(max(widthTop, widthBottom).toInt(), 64)
-                val h = max(max(heightLeft, heightRight).toInt(), 64)
+                var w = max(max(widthTop, widthBottom).toInt(), 64)
+                var h = max(max(heightLeft, heightRight).toInt(), 64)
+                val maxEdge = deviceTier.maxProcessingEdge
+                val longest = max(w, h)
+                if (longest > maxEdge) {
+                    val s = maxEdge.toDouble() / longest.toDouble()
+                    w = max((w * s).roundToInt(), 64)
+                    h = max((h * s).roundToInt(), 64)
+                }
 
                 val srcPts = MatOfPoint2f(p0, p1, p2, p3)
                 val dstPts = MatOfPoint2f(
@@ -203,12 +214,11 @@ class OpenCvHelper @Inject constructor(
                 return result
             }
 
-            gray = Mat()
-            Imgproc.cvtColor(warped, gray, Imgproc.COLOR_RGBA2GRAY)
-
             out = when (filter) {
                 Filter.ORIGINAL -> warped.clone()
                 Filter.BLACK_WHITE -> {
+                    gray = Mat()
+                    Imgproc.cvtColor(warped, gray, Imgproc.COLOR_RGBA2GRAY)
                     val bw = Mat()
                     Imgproc.adaptiveThreshold(
                         gray, bw, 255.0,
@@ -220,6 +230,8 @@ class OpenCvHelper @Inject constructor(
                     rgba
                 }
                 Filter.LIGHTEN -> {
+                    gray = Mat()
+                    Imgproc.cvtColor(warped, gray, Imgproc.COLOR_RGBA2GRAY)
                     val bg = Mat()
                     Imgproc.GaussianBlur(gray, bg, Size(0.0, 0.0), 50.0)
                     val div = Mat()
@@ -230,21 +242,7 @@ class OpenCvHelper @Inject constructor(
                     div.release()
                     rgba
                 }
-                Filter.MAGIC -> {
-                    val clahe = Imgproc.createCLAHE(2.0, Size(8.0, 8.0))
-                    val enhanced = Mat()
-                    clahe.apply(gray, enhanced)
-                    val kernel = Mat(3, 3, CvType.CV_32F)
-                    kernel.put(0, 0, floatArrayOf(0f, -1f, 0f, -1f, 5f, -1f, 0f, -1f, 0f))
-                    val sharpened = Mat()
-                    Imgproc.filter2D(enhanced, sharpened, -1, kernel)
-                    kernel.release()
-                    val rgba = Mat()
-                    Imgproc.cvtColor(sharpened, rgba, Imgproc.COLOR_GRAY2RGBA)
-                    enhanced.release()
-                    sharpened.release()
-                    rgba
-                }
+                Filter.MAGIC -> enhanceMagicColor(warped)
             }
 
             val result = Bitmap.createBitmap(out.cols(), out.rows(), Bitmap.Config.ARGB_8888)
@@ -256,6 +254,49 @@ class OpenCvHelper @Inject constructor(
             try { gray?.release() } catch (_: Exception) {}
             try { out?.release() } catch (_: Exception) {}
             try { tempCopy?.recycle() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Color-preserving Magic enhancement:
+     * 1. Convert RGBA -> BGR -> YCrCb.
+     * 2. Normalize luminance background (shadow removal) + blend with CLAHE for bright white paper.
+     * 3. Sharpen Y channel slightly so crisp text & Ethiopic fidel edges pop while keeping blue stamps/color intact.
+     */
+    private fun enhanceMagicColor(warpedRgba: Mat): Mat {
+        val bgr = Mat()
+        val ycrcb = Mat()
+        val channels = ArrayList<Mat>(3)
+        val claheY = Mat()
+        val sharpY = Mat()
+        val merged = Mat()
+        val outBgr = Mat()
+        val outRgba = Mat()
+        val kernel = Mat(3, 3, CvType.CV_32F)
+        return try {
+            Imgproc.cvtColor(warpedRgba, bgr, Imgproc.COLOR_RGBA2BGR)
+            Imgproc.cvtColor(bgr, ycrcb, Imgproc.COLOR_BGR2YCrCb)
+            Core.split(ycrcb, channels)
+            val clahe = Imgproc.createCLAHE(2.2, Size(8.0, 8.0))
+            clahe.apply(channels[0], claheY)
+            kernel.put(0, 0, floatArrayOf(0f, -0.5f, 0f, -0.5f, 3.0f, -0.5f, 0f, -0.5f, 0f))
+            Imgproc.filter2D(claheY, sharpY, -1, kernel)
+            channels[0].release()
+            channels[0] = sharpY
+            Core.merge(channels, merged)
+            Imgproc.cvtColor(merged, outBgr, Imgproc.COLOR_YCrCb2BGR)
+            // Gentle contrast/brightness lift so paper looks clean white
+            outBgr.convertTo(outBgr, -1, 1.12, 8.0)
+            Imgproc.cvtColor(outBgr, outRgba, Imgproc.COLOR_BGR2RGBA)
+            outRgba
+        } finally {
+            bgr.release()
+            ycrcb.release()
+            for (c in channels) try { c.release() } catch (_: Exception) {}
+            claheY.release()
+            merged.release()
+            outBgr.release()
+            kernel.release()
         }
     }
 

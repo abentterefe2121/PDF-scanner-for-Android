@@ -2,7 +2,6 @@ package com.pdfscanner.app.core.camera
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.util.Size
 import androidx.camera.core.Camera
@@ -16,8 +15,8 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
-import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
+import com.pdfscanner.app.core.common.BitmapUtils
 import com.pdfscanner.app.core.common.DeviceTier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -32,7 +31,7 @@ import kotlin.coroutines.suspendCoroutine
  * CameraX wrapper — tuned for low-end speed (CameraX 1.6.1 ResolutionSelector).
  * - Preview + Analysis (RGBA_8888 640x480) + Capture separate use cases.
  * - Analysis KEEP_ONLY_LATEST, single executor.
- * - Capture writes a temp file then decodes with EXIF rotation (no OOM).
+ * - Capture writes a temp file then sub-samples + EXIF-rotates directly to maxProcessingEdge (no 48MP OOM).
  */
 @Singleton
 class CameraManager @Inject constructor(
@@ -112,7 +111,7 @@ class CameraManager @Inject constructor(
         } catch (_: Exception) {}
     }
 
-    /** Capture a photo, apply EXIF orientation, return Bitmap. Suspends until done. */
+    /** Capture a photo, downsample + apply EXIF orientation, return Bitmap. Suspends until done. */
     suspend fun takePicture(): Bitmap = suspendCoroutine { cont ->
         val capture = imageCapture
         if (capture == null) {
@@ -128,16 +127,21 @@ class CameraManager @Inject constructor(
             object : ImageCapture.OnImageSavedCallback {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     try {
-                        val bmp = decodeWithExif(file)
+                        val bmp = BitmapUtils.decodeSampledFile(
+                            file.absolutePath,
+                            deviceTier.maxProcessingEdge
+                        )
                         file.delete()
                         if (bmp != null) cont.resume(bmp)
                         else cont.resumeWithException(IllegalStateException("Decode failed"))
                     } catch (e: Exception) {
+                        file.delete()
                         cont.resumeWithException(e)
                     }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
+                    file.delete()
                     cont.resumeWithException(exception)
                 }
             }
@@ -159,25 +163,6 @@ class CameraManager @Inject constructor(
         val matrix = Matrix().apply { postRotate(rot.toFloat()) }
         val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
         if (rotated !== raw) raw.recycle()
-        return rotated
-    }
-
-    private fun decodeWithExif(file: File): Bitmap? {
-        val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return null
-        val exif = try { ExifInterface(file.absolutePath) } catch (_: Exception) { return bmp }
-        val orientation = exif.getAttributeInt(
-            ExifInterface.TAG_ORIENTATION,
-            ExifInterface.ORIENTATION_NORMAL
-        )
-        val degrees = when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-            else -> return bmp
-        }
-        val matrix = Matrix().apply { postRotate(degrees) }
-        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-        if (rotated !== bmp) bmp.recycle()
         return rotated
     }
 }

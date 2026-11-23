@@ -81,6 +81,25 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun duplicateDocument(doc: DocumentEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val src = File(doc.pdfPath)
+            if (!src.exists()) return@launch
+            val dest = File(src.parentFile, "copy_${System.currentTimeMillis()}_${src.name}")
+            src.copyTo(dest, overwrite = true)
+            dao.insert(
+                DocumentEntity(
+                    title = "${doc.title} (Copy)",
+                    pdfPath = dest.absolutePath,
+                    pageCount = doc.pageCount,
+                    ocrText = doc.ocrText,
+                    folder = doc.folder
+                )
+            )
+            load()
+        }
+    }
+
     fun deleteDocument(doc: DocumentEntity) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.deleteById(doc.id)
