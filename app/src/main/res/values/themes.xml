@@ -12,6 +12,7 @@
     <style name="Theme.PdfScanner.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/primary</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_scan</item>
+        <item name="postSplashScreenTheme">@style/Theme.PdfScanner</item>
     </style>
 
     <style name="ThemeOverlay.PdfScanner.AppBar" parent="">

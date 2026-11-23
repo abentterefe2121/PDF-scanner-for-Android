@@ -4,7 +4,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptionsInterface
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -28,7 +28,7 @@ class MlKitOcrEngine @Inject constructor() : OcrEngine {
 
     override suspend fun recognize(bitmap: Bitmap): OcrResult {
         return try {
-            val recognizer = TextRecognition.getClient(TextRecognizerOptionsInterface.LATIN)
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
             val image = InputImage.fromBitmap(bitmap, 0)
             val result = recognizer.process(image).await()
             val text = result.text.trim()
