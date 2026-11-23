@@ -1,8 +1,16 @@
-// Top-level build file — PDF Scanner (Kotlin Native, Views, API 26+)
+// Top-level build file — PDF Scanner (Kotlin Native, Views, API 26 -> 36)
 plugins {
-    id("com.android.application") version "8.5.2" apply false
-    id("org.jetbrains.kotlin.android") version "2.0.20" apply false
-    id("org.jetbrains.kotlin.plugin.serialization") version "2.0.20" apply false
-    id("com.google.dagger.hilt.android") version "2.51.1" apply false
-    id("com.google.devtools.ksp") version "2.0.20-1.0.25" apply false
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.serialization) apply false
+    alias(libs.plugins.hilt) apply false
+    alias(libs.plugins.ksp) apply false
+}
+
+val kotlinVersion = libs.versions.kotlin.get()
+subprojects {
+    configurations.all {
+        resolutionStrategy {
+            force("org.jetbrains.kotlin:kotlin-metadata-jvm:$kotlinVersion")
+        }
+    }
 }

@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
@@ -8,20 +7,18 @@ plugins {
 
 android {
     namespace = "com.pdfscanner.app"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.pdfscanner.app"
         minSdk = 26 // Android 8.0 — broad low-end reach (Tecno/Infinix/Samsung A)
-        targetSdk = 34
+        targetSdk = 36 // Android 16
         versionCode = 1
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
 
-        // Split APKs by ABI to keep download small on low-end / slow internet.
-        // Play App Bundle will handle this automatically; ndk filters help local builds.
         ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
     }
 
@@ -44,7 +41,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
 
     buildFeatures { viewBinding = true }
 
@@ -56,6 +52,10 @@ android {
         abortOnError = false
         checkReleaseBuilds = false
     }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {
