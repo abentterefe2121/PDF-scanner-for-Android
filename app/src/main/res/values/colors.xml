@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#0B57D0</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#D3E3FD</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#F0F4F9</color>
+    <color name="on_surface">#1F1F1F</color>
+    <color name="edge_detected">#FFC107</color>
+    <color name="edge_ready">#4CAF50</color>
+    <color name="edge_guide">#FFFFFF</color>
+    <color name="edge_fill">#4CAF50</color>
+</resources>

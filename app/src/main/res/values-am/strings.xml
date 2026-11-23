@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PDF ስካነር</string>
+    <string name="home">መነሻ</string>
+    <string name="scan">ስካን ያድርጉ</string>
+    <string name="capture">አንሳ</string>
+    <string name="flash">ብርሃን</string>
+    <string name="import_gallery">ከጋለሪ አስገባ</string>
+    <string name="align_document">ሰነዱን አሰልፍ</string>
+    <string name="search_hint">ሰነዶችን ፈልግ…</string>
+    <string name="empty_documents">እስካሁን ሰነድ የለም።\nለመጀመሪያ PDFዎት ስካን ይጫኑ።</string>
+    <string name="create_pdf">PDF ፍጠር</string>
+    <string name="share">አጋራ</string>
+    <string name="settings">ቅንብሮች</string>
+    <string name="ocr_downloading">የአማርኛ OCR እየወረደ ነው…</string>
+    <string name="ocr_ready">የአማርኛ OCR ዝግጁ ነው</string>
+    <string name="no_text_found">ጽሑፍ አልተገኘም — የተሻለ ብርሃን ይሞክሩ</string>
+</resources>
