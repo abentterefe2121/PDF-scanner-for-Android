@@ -2,7 +2,10 @@ package com.pdfscanner.app.ui.editor
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.RectF
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.pdfscanner.app.core.common.BitmapUtils
@@ -121,6 +124,39 @@ class EditorViewModel @Inject constructor(
         }
     }
 
+    fun applySignature(pageIndex: Int, signatureBmp: Bitmap) {
+        viewModelScope.launch(Dispatchers.Default) {
+            val page = ScanSession.loadBitmap(pageIndex)
+            if (page == null) {
+                BitmapUtils.safeRecycle(signatureBmp)
+                return@launch
+            }
+            val out = page.copy(Bitmap.Config.ARGB_8888, true)
+            BitmapUtils.safeRecycle(page)
+            val canvas = Canvas(out)
+            val sigW = out.width * 0.30f
+            val sigH = sigW * (signatureBmp.height.toFloat() / maxOf(signatureBmp.width, 1))
+            val margin = out.width * 0.06f
+            val dest = RectF(
+                out.width - sigW - margin,
+                out.height - sigH - margin,
+                out.width - margin,
+                out.height - margin
+            )
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            canvas.drawBitmap(signatureBmp, null, dest, paint)
+            BitmapUtils.safeRecycle(signatureBmp)
+
+            val dir = File(context.cacheDir, "scans")
+            val newPath = ScanSession.saveBitmap(dir, "page", out, deviceTier.jpegQuality)
+            BitmapUtils.safeRecycle(out)
+            if (newPath != null) {
+                ScanSession.updateProcessed(pageIndex, newPath)
+                _pagesVersion.value += 1
+            }
+        }
+    }
+
     fun movePage(from: Int, to: Int) {
         ScanSession.move(from, to)
     }
@@ -135,16 +171,18 @@ class EditorViewModel @Inject constructor(
         return "Scan $stamp"
     }
 
-    /** Generate searchable PDF + OCR + save to Room. Runs on Default/IO. */
+    /** Generate searchable PDF + single-init batch OCR + save to Room. Runs on Default/IO. */
     fun createPdf(customTitle: String? = null, folder: String = "Inbox") {
         if (ScanSession.paths.isEmpty() || _isBusy.value) return
         viewModelScope.launch {
             _isBusy.value = true
             val pages = mutableListOf<PdfGenerator.Page>()
+            var tessSession: com.pdfscanner.app.core.ocr.TesseractOcrEngine.Session? = null
             try {
                 _status.value = "Preparing Amharic + English OCR…"
                 packDownloader.ensurePacks { msg -> _status.value = msg }
 
+                tessSession = withContext(Dispatchers.Default) { ocr.openTesseractSession() }
                 val allText = StringBuilder()
                 val paths = ScanSession.paths
                 for ((i, path) in paths.withIndex()) {
@@ -152,7 +190,9 @@ class EditorViewModel @Inject constructor(
                     val bmp = withContext(Dispatchers.Default) {
                         BitmapUtils.decodeSampledFile(path, deviceTier.maxProcessingEdge)
                     } ?: continue
-                    val result = withContext(Dispatchers.Default) { ocr.recognize(bmp) }
+                    val result = withContext(Dispatchers.Default) {
+                        ocr.recognize(bmp, tessSession)
+                    }
                     if (result.text.isNotBlank()) {
                         allText.append(result.text).append("\n\n")
                     }
@@ -189,6 +229,7 @@ class EditorViewModel @Inject constructor(
             } catch (e: Exception) {
                 _status.value = "Error: ${e.message}"
             } finally {
+                try { tessSession?.close() } catch (_: Exception) {}
                 for (p in pages) BitmapUtils.safeRecycle(p.bitmap)
                 _isBusy.value = false
             }

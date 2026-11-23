@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.util.Log
 import com.googlecode.tesseract.android.TessBaseAPI
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.Closeable
 import java.io.File
 import java.text.Normalizer
 import javax.inject.Inject
@@ -12,9 +13,7 @@ import javax.inject.Singleton
 
 /**
  * Offline OCR — Tesseract 5 LSTM with Amharic + English.
- *
- * Tesseract init(datapath, lang) expects `filesDir` (parent of `tessdata/`),
- * because it resolves `<datapath>/tessdata/<lang>.traineddata`.
+ * Supports single-init Session for fast multi-page PDF OCR without re-init overhead per page.
  */
 @Singleton
 class TesseractOcrEngine @Inject constructor(
@@ -25,6 +24,32 @@ class TesseractOcrEngine @Inject constructor(
         private const val TAG = "TesseractOcr"
         const val LANG_AMHARIC = "amh"
         const val LANG_ENGLISH = "eng"
+    }
+
+    inner class Session internal constructor(
+        private val api: TessBaseAPI,
+        val langSpec: String
+    ) : Closeable {
+        fun recognize(bitmap: Bitmap): OcrResult {
+            return try {
+                api.setImage(bitmap)
+                val raw = api.getUTF8Text() ?: ""
+                val normalized = Normalizer.normalize(raw, Normalizer.Form.NFC).trim()
+                OcrResult(
+                    text = normalized,
+                    confidence = if (normalized.isNotEmpty()) 0.85f else 0f,
+                    language = langSpec,
+                    isOnline = false
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Tesseract session failed", e)
+                OcrResult("", 0f, langSpec, false)
+            }
+        }
+
+        override fun close() {
+            try { api.recycle() } catch (_: Exception) {}
+        }
     }
 
     private val tessDataDir: File
@@ -49,35 +74,29 @@ class TesseractOcrEngine @Inject constructor(
 
     override fun isAvailable(): Boolean = availableLangSpec() != null
 
-    override suspend fun recognize(bitmap: Bitmap): OcrResult {
-        val langSpec = availableLangSpec()
-        if (langSpec == null) {
-            Log.w(TAG, "Tessdata not downloaded yet — returning empty (offline OCR pending download)")
-            return OcrResult(text = "", confidence = 0f, language = "amh+eng", isOnline = false)
-        }
-        var api: TessBaseAPI? = null
+    fun openSession(): Session? {
+        val langSpec = availableLangSpec() ?: return null
         return try {
-            api = TessBaseAPI()
+            val api = TessBaseAPI()
             val ok = api.init(context.filesDir.absolutePath, langSpec)
             if (!ok) {
-                return OcrResult("", 0f, langSpec, false)
+                try { api.recycle() } catch (_: Exception) {}
+                return null
             }
             api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
             api.setVariable("preserve_interword_spaces", "1")
-            api.setImage(bitmap)
-            val raw = api.getUTF8Text() ?: ""
-            val normalized = Normalizer.normalize(raw, Normalizer.Form.NFC).trim()
-            OcrResult(
-                text = normalized,
-                confidence = if (normalized.isNotEmpty()) 0.85f else 0f,
-                language = langSpec,
-                isOnline = false
-            )
+            Session(api, langSpec)
         } catch (e: Exception) {
-            Log.e(TAG, "Tesseract failed", e)
-            OcrResult("", 0f, langSpec, false)
-        } finally {
-            try { api?.recycle() } catch (_: Exception) {}
+            Log.e(TAG, "Tesseract init failed", e)
+            null
         }
+    }
+
+    override suspend fun recognize(bitmap: Bitmap): OcrResult {
+        val session = openSession() ?: run {
+            Log.w(TAG, "Tessdata not downloaded yet — returning empty")
+            return OcrResult(text = "", confidence = 0f, language = "amh+eng", isOnline = false)
+        }
+        return session.use { it.recognize(bitmap) }
     }
 }

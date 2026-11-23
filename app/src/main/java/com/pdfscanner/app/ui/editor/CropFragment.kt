@@ -62,7 +62,7 @@ class CropFragment : Fragment() {
         binding.imageCrop.setImageBitmap(bmp)
 
         binding.cropOverlay.post {
-            binding.cropOverlay.setImageBounds(bmp.width, bmp.height)
+            binding.cropOverlay.setSourceBitmap(bmp)
             val existing = entry.quad
             if (existing != null && existing.size == 4 && entry.quadWidth > 0 && entry.quadHeight > 0) {
                 val norm = existing.map {

@@ -92,15 +92,24 @@
             style="@style/Widget.Material3.Button.OutlinedButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
+            android:layout_marginEnd="6dp"
             android:layout_weight="1"
             android:text="@string/add_page" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_sign"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="6dp"
+            android:layout_weight="0.85"
+            android:text="@string/sign" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/button_done"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="1.5"
+            android:layout_weight="1.35"
             android:text="@string/create_pdf" />
     </LinearLayout>
 

@@ -32,6 +32,10 @@ jobs:
         run: |
           set -o pipefail
           ./gradlew assembleDebug --console=plain 2>&1 | tee /tmp/gradle.log
+      - name: Build Release APK (R8 Check)
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease --console=plain 2>&1 | tee -a /tmp/gradle.log
       - name: Run Unit Tests
         run: |
           set -o pipefail

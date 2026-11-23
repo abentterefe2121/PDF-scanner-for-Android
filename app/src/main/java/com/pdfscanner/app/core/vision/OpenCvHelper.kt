@@ -300,6 +300,44 @@ class OpenCvHelper @Inject constructor(
         }
     }
 
+    /**
+     * Composites Front + Back ID card scans neatly onto a crisp white A4-proportioned bitmap.
+     */
+    fun compositeIdCardA4(front: Bitmap, back: Bitmap): Bitmap {
+        val pageW = 1240
+        val pageH = 1754
+        val out = Bitmap.createBitmap(pageW, pageH, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(out)
+        canvas.drawColor(android.graphics.Color.WHITE)
+
+        val borderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.STROKE
+            strokeWidth = 3f
+            color = 0xFFD0D5DD.toInt()
+        }
+        val imagePaint = android.graphics.Paint(
+            android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG
+        )
+
+        val maxCardW = pageW * 0.78f
+        val maxCardH = pageH * 0.34f
+
+        fun drawCard(card: Bitmap, centerY: Float) {
+            val scale = minOf(maxCardW / maxOf(card.width, 1), maxCardH / maxOf(card.height, 1))
+            val dw = card.width * scale
+            val dh = card.height * scale
+            val left = (pageW - dw) / 2f
+            val top = centerY - dh / 2f
+            val rect = android.graphics.RectF(left, top, left + dw, top + dh)
+            canvas.drawBitmap(card, null, rect, imagePaint)
+            canvas.drawRect(rect, borderPaint)
+        }
+
+        drawCard(front, pageH * 0.30f)
+        drawCard(back, pageH * 0.70f)
+        return out
+    }
+
     /** Sharpness (Laplacian variance). Higher = sharper. Threshold ~80-100 for auto-capture. */
     fun sharpnessScore(frame: Bitmap): Double {
         if (!ensureLoaded()) return 0.0

@@ -2,6 +2,7 @@ package com.pdfscanner.app.ui.scanner
 
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
@@ -11,12 +12,10 @@ import androidx.core.content.ContextCompat
 import com.pdfscanner.app.R
 
 /**
- * Custom View that draws the live document edge quad over the camera preview.
- * Native View (not Compose) — zero bridge overhead, 60fps on low-end.
- *
- * States:
- * - No quad: show dashed guide rectangle + "Align document" hint
- * - Quad detected: solid corners, green when stable/sharp (auto-capture ready)
+ * Custom View that draws:
+ * - Live document edge quad (green when steady/sharp)
+ * - Optional rule-of-thirds alignment grid
+ * - Tap-to-focus ring feedback
  */
 class EdgeOverlayView @JvmOverloads constructor(
     context: Context,
@@ -36,7 +35,19 @@ class EdgeOverlayView @JvmOverloads constructor(
             invalidate()
         }
 
-    private val paintStroke = Paint().apply {
+    var showGrid: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
+
+    private var focusPoint: PointF? = null
+    private val clearFocusRunnable = Runnable {
+        focusPoint = null
+        invalidate()
+    }
+
+    private val paintStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 6f
         color = ContextCompat.getColor(context, R.color.edge_detected)
@@ -44,7 +55,7 @@ class EdgeOverlayView @JvmOverloads constructor(
         strokeJoin = Paint.Join.ROUND
     }
 
-    private val paintGuide = Paint().apply {
+    private val paintGuide = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 4f
         color = ContextCompat.getColor(context, R.color.edge_guide)
@@ -57,8 +68,37 @@ class EdgeOverlayView @JvmOverloads constructor(
         alpha = 40
     }
 
+    private val paintGrid = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        color = 0x55FFFFFF
+    }
+
+    private val paintFocus = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 4f
+        color = Color.WHITE
+    }
+
+    fun showFocusRing(x: Float, y: Float) {
+        removeCallbacks(clearFocusRunnable)
+        focusPoint = PointF(x, y)
+        invalidate()
+        postDelayed(clearFocusRunnable, 900)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+
+        if (showGrid && width > 0 && height > 0) {
+            val w = width.toFloat()
+            val h = height.toFloat()
+            canvas.drawLine(w / 3f, 0f, w / 3f, h, paintGrid)
+            canvas.drawLine(w * 2f / 3f, 0f, w * 2f / 3f, h, paintGrid)
+            canvas.drawLine(0f, h / 3f, w, h / 3f, paintGrid)
+            canvas.drawLine(0f, h * 2f / 3f, w, h * 2f / 3f, paintGrid)
+        }
+
         val q = quad
         if (q != null && q.size == 4) {
             val path = Path().apply {
@@ -76,7 +116,6 @@ class EdgeOverlayView @JvmOverloads constructor(
             }
             canvas.drawPath(path, paintStroke)
         } else {
-            // Guide rectangle (centered, 80% width)
             val marginX = width * 0.1f
             val marginY = height * 0.2f
             canvas.drawRoundRect(
@@ -84,6 +123,10 @@ class EdgeOverlayView @JvmOverloads constructor(
                 width - marginX, height - marginY,
                 24f, 24f, paintGuide
             )
+        }
+
+        focusPoint?.let { p ->
+            canvas.drawCircle(p.x, p.y, 44f, paintFocus)
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.pdfscanner.app.ui.editor
 
+import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -18,6 +19,7 @@ import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.button.MaterialButton
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.pdfscanner.app.R
 import com.pdfscanner.app.core.common.ScanSession
@@ -88,6 +90,7 @@ class EditorFragment : Fragment() {
         binding.buttonAddPage.setOnClickListener {
             findNavController().navigate(R.id.action_editor_to_scanner)
         }
+        binding.buttonSign.setOnClickListener { showSignatureDialog() }
         binding.buttonDone.setOnClickListener { showSaveDialog() }
         updateButtons()
 
@@ -139,7 +142,60 @@ class EditorFragment : Fragment() {
         val hasPages = ScanSession.paths.isNotEmpty()
         val busy = viewModel.isBusy.value
         binding.buttonDone.isEnabled = hasPages && !busy
+        binding.buttonSign.isEnabled = hasPages && !busy
         binding.buttonAddPage.isEnabled = !busy
+    }
+
+    private fun showSignatureDialog() {
+        if (ScanSession.paths.isEmpty()) return
+        val ctx = requireContext()
+        val density = resources.displayMetrics.density
+        val pad = (16 * density).toInt()
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad / 2, pad, 0)
+        }
+        val sigView = SignatureView(ctx).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (220 * density).toInt()
+            )
+            setBackgroundColor(Color.WHITE)
+        }
+        val controlsRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, (8 * density).toInt(), 0, 0)
+        }
+        val blackBtn = MaterialButton(ctx, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.ink_black)
+            setOnClickListener { sigView.setInkColor(0xFF111827.toInt()) }
+        }
+        val blueBtn = MaterialButton(ctx, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.ink_blue)
+            setOnClickListener { sigView.setInkColor(0xFF1D4ED8.toInt()) }
+        }
+        val clearBtn = MaterialButton(ctx, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
+            text = getString(R.string.clear)
+            setOnClickListener { sigView.clear() }
+        }
+        controlsRow.addView(blackBtn)
+        controlsRow.addView(blueBtn)
+        controlsRow.addView(clearBtn)
+
+        container.addView(sigView)
+        container.addView(controlsRow)
+
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle(R.string.signature_title)
+            .setView(container)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val bmp = sigView.exportBitmap()
+                if (bmp != null) {
+                    viewModel.applySignature(ScanSession.paths.lastIndex, bmp)
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     private fun showSaveDialog() {

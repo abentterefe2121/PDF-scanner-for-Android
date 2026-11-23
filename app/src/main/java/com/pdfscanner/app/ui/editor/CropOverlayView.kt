@@ -1,11 +1,13 @@
 package com.pdfscanner.app.ui.editor
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PointF
+import android.graphics.Rect
 import android.graphics.RectF
 import android.util.AttributeSet
 import android.view.MotionEvent
@@ -15,8 +17,8 @@ import com.pdfscanner.app.R
 import kotlin.math.hypot
 
 /**
- * Interactive 4-corner document cropper overlay.
- * Corners are stored in normalized [0..1] coordinates relative to the displayed image rect.
+ * Interactive 4-corner document cropper overlay with a circular 2x Magnifier Loupe
+ * above the dragged corner so fingers never hide exact paper edges.
  */
 class CropOverlayView @JvmOverloads constructor(
     context: Context,
@@ -24,7 +26,6 @@ class CropOverlayView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    // Normalized [0..1] corners: TL, TR, BR, BL
     private val corners = arrayOf(
         PointF(0.08f, 0.08f),
         PointF(0.92f, 0.08f),
@@ -33,6 +34,7 @@ class CropOverlayView @JvmOverloads constructor(
     )
 
     private var imageRect = RectF(0f, 0f, 1f, 1f)
+    private var sourceBitmap: Bitmap? = null
     private var activeIndex = -1
 
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -55,6 +57,25 @@ class CropOverlayView @JvmOverloads constructor(
     private val scrimPaint = Paint().apply {
         style = Paint.Style.FILL
         color = 0x77000000
+    }
+
+    private val loupeBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 6f
+        color = Color.WHITE
+    }
+
+    private val loupeCrossPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        color = ContextCompat.getColor(context, R.color.edge_ready)
+    }
+
+    private val loupeImagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    fun setSourceBitmap(bmp: Bitmap?) {
+        sourceBitmap = bmp
+        if (bmp != null) setImageBounds(bmp.width, bmp.height)
     }
 
     fun setImageBounds(bitmapW: Int, bitmapH: Int) {
@@ -124,6 +145,43 @@ class CropOverlayView @JvmOverloads constructor(
             canvas.drawCircle(p.x, p.y, r, handleFillPaint)
             canvas.drawCircle(p.x, p.y, r, handleStrokePaint)
         }
+
+        // Draw 2x Magnifier Loupe when dragging a corner
+        val bmp = sourceBitmap
+        if (activeIndex in 0..3 && bmp != null && !bmp.isRecycled) {
+            drawLoupe(canvas, bmp, corners[activeIndex], pts[activeIndex])
+        }
+    }
+
+    private fun drawLoupe(canvas: Canvas, bmp: Bitmap, norm: PointF, viewPt: PointF) {
+        val radius = 110f
+        val cx = viewPt.x.coerceIn(radius + 16f, width - radius - 16f)
+        val cy = if (viewPt.y > radius * 2 + 60f) {
+            viewPt.y - radius - 75f
+        } else {
+            viewPt.y + radius + 75f
+        }
+
+        val srcX = (norm.x * bmp.width).toInt()
+        val srcY = (norm.y * bmp.height).toInt()
+        val halfSample = (minOf(bmp.width, bmp.height) * 0.08f).toInt().coerceAtLeast(32)
+        val srcRect = Rect(
+            (srcX - halfSample).coerceAtLeast(0),
+            (srcY - halfSample).coerceAtLeast(0),
+            (srcX + halfSample).coerceAtMost(bmp.width),
+            (srcY + halfSample).coerceAtMost(bmp.height)
+        )
+        val dstRect = RectF(cx - radius, cy - radius, cx + radius, cy + radius)
+
+        canvas.save()
+        val clip = Path().apply { addCircle(cx, cy, radius, Path.Direction.CW) }
+        canvas.clipPath(clip)
+        canvas.drawColor(Color.BLACK)
+        canvas.drawBitmap(bmp, srcRect, dstRect, loupeImagePaint)
+        canvas.drawLine(cx - 24f, cy, cx + 24f, cy, loupeCrossPaint)
+        canvas.drawLine(cx, cy - 24f, cx, cy + 24f, loupeCrossPaint)
+        canvas.restore()
+        canvas.drawCircle(cx, cy, radius, loupeBorderPaint)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -131,7 +189,7 @@ class CropOverlayView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 var bestIdx = -1
-                var bestDist = 110f
+                var bestDist = 115f
                 for (i in 0 until 4) {
                     val p = toView(corners[i])
                     val d = hypot(event.x - p.x, event.y - p.y)

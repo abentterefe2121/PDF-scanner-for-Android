@@ -6,6 +6,7 @@ import android.graphics.Matrix
 import android.util.Size
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
@@ -14,6 +15,7 @@ import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import com.pdfscanner.app.core.common.BitmapUtils
@@ -21,6 +23,7 @@ import com.pdfscanner.app.core.common.DeviceTier
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
@@ -30,7 +33,7 @@ import kotlin.coroutines.suspendCoroutine
 /**
  * CameraX wrapper — tuned for low-end speed (CameraX 1.6.1 ResolutionSelector).
  * - Preview + Analysis (RGBA_8888 640x480) + Capture separate use cases.
- * - Analysis KEEP_ONLY_LATEST, single executor.
+ * - Supports tap-to-focus & metering via PreviewView.meteringPointFactory.
  * - Capture writes a temp file then sub-samples + EXIF-rotates directly to maxProcessingEdge (no 48MP OOM).
  */
 @Singleton
@@ -53,7 +56,7 @@ class CameraManager @Inject constructor(
 
     fun start(
         lifecycleOwner: LifecycleOwner,
-        previewView: androidx.camera.view.PreviewView,
+        previewView: PreviewView,
         onReady: () -> Unit = {}
     ) {
         val providerFuture = ProcessCameraProvider.getInstance(context)
@@ -102,6 +105,16 @@ class CameraManager @Inject constructor(
             camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, analysis, imageCapture)
             onReady()
         }, ContextCompat.getMainExecutor(context))
+    }
+
+    fun focusAt(previewView: PreviewView, x: Float, y: Float) {
+        try {
+            val point = previewView.meteringPointFactory.createPoint(x, y)
+            val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+                .setAutoCancelDuration(3, TimeUnit.SECONDS)
+                .build()
+            camera?.cameraControl?.startFocusAndMetering(action)
+        } catch (_: Exception) {}
     }
 
     fun setTorch(on: Boolean) {

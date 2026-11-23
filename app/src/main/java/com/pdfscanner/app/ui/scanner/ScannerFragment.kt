@@ -1,6 +1,7 @@
 package com.pdfscanner.app.ui.scanner
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -10,6 +11,7 @@ import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
@@ -47,6 +49,8 @@ class ScannerFragment : Fragment() {
 
     private var isCapturing = false
     private var lastQuadResult: ScannerViewModel.QuadResult? = null
+    private var isIdCardMode = false
+    private var pendingIdFront: Bitmap? = null
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -67,6 +71,7 @@ class ScannerFragment : Fragment() {
         return binding.root
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         OpenCvHelper.ensureLoaded()
@@ -78,6 +83,11 @@ class ScannerFragment : Fragment() {
             cameraManager.setTorch(next)
             updateTorchUi(next)
         }
+        binding.buttonGridToggle.setOnClickListener {
+            val next = !binding.edgeOverlay.showGrid
+            binding.edgeOverlay.showGrid = next
+            binding.buttonGridToggle.text = getString(if (next) R.string.grid_on else R.string.grid_off)
+        }
         binding.buttonAutoToggle.setOnClickListener { viewModel.toggleAutoCapture() }
         binding.buttonBatchToggle.setOnClickListener { viewModel.toggleBatchMode() }
         binding.buttonDoneBatch.setOnClickListener {
@@ -85,8 +95,21 @@ class ScannerFragment : Fragment() {
                 findNavController().navigate(R.id.action_scanner_to_editor)
             }
         }
+
+        binding.modeDoc.setOnClickListener { setScanMode(false) }
+        binding.modeIdCard.setOnClickListener { setScanMode(true) }
+
+        binding.edgeOverlay.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_UP) {
+                cameraManager.focusAt(binding.previewView, event.x, event.y)
+                binding.edgeOverlay.showFocusRing(event.x, event.y)
+            }
+            true
+        }
+
         updateBatchBadge()
         updateTorchUi(false)
+        setScanMode(false)
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -99,12 +122,10 @@ class ScannerFragment : Fragment() {
                 launch {
                     viewModel.isStable.collect { stable ->
                         binding.edgeOverlay.isStable = stable
-                        if (!isCapturing) {
-                            binding.textHint.text = if (stable) {
-                                getString(R.string.hold_steady)
-                            } else {
-                                getString(R.string.align_document)
-                            }
+                        if (!isCapturing && !isIdCardMode) {
+                            binding.textHint.text = getString(
+                                if (stable) R.string.hold_steady else R.string.align_document
+                            )
                         }
                     }
                 }
@@ -124,8 +145,10 @@ class ScannerFragment : Fragment() {
                 }
                 launch {
                     viewModel.captureEvent.collect {
-                        vibrate()
-                        capture()
+                        if (!isIdCardMode) {
+                            vibrate()
+                            capture()
+                        }
                     }
                 }
             }
@@ -139,6 +162,23 @@ class ScannerFragment : Fragment() {
         } else {
             permissionLauncher.launch(Manifest.permission.CAMERA)
         }
+    }
+
+    private fun setScanMode(idCard: Boolean) {
+        isIdCardMode = idCard
+        BitmapUtils.safeRecycle(pendingIdFront)
+        pendingIdFront = null
+        val activeColor = ContextCompat.getColor(requireContext(), R.color.edge_ready)
+        binding.modeDoc.setTextColor(if (!idCard) activeColor else Color.WHITE)
+        binding.modeIdCard.setTextColor(if (idCard) activeColor else Color.WHITE)
+        binding.textHint.text = getString(
+            if (idCard) R.string.scan_id_front else R.string.align_document
+        )
+    }
+
+    private fun animateShutterFlash() {
+        binding.viewShutterFlash.alpha = 0.85f
+        binding.viewShutterFlash.animate().alpha(0f).setDuration(140).start()
     }
 
     private fun updateTorchUi(on: Boolean) {
@@ -156,10 +196,6 @@ class ScannerFragment : Fragment() {
         }
     }
 
-    /**
-     * Maps analysis-frame quad coordinates to PreviewView (FILL_CENTER aspect-fill)
-     * so the live green quad aligns accurately on 20:9 tall phone displays.
-     */
     private fun updateOverlay(qr: ScannerViewModel.QuadResult?) {
         val overlay = binding.edgeOverlay
         if (qr == null || overlay.width == 0 || overlay.height == 0 || qr.frameWidth <= 0 || qr.frameHeight <= 0) {
@@ -180,7 +216,7 @@ class ScannerFragment : Fragment() {
         try {
             cameraManager.onFrame = { frame -> viewModel.onFrame(frame) }
             cameraManager.start(viewLifecycleOwner, binding.previewView) {
-                if (_binding != null) {
+                if (_binding != null && !isIdCardMode) {
                     binding.textHint.text = getString(R.string.align_document)
                 }
             }
@@ -197,6 +233,7 @@ class ScannerFragment : Fragment() {
     private fun capture() {
         if (isCapturing) return
         isCapturing = true
+        animateShutterFlash()
         binding.textHint.text = getString(R.string.processing)
         val qr = lastQuadResult
         lifecycleScope.launch(Dispatchers.Default) {
@@ -211,32 +248,7 @@ class ScannerFragment : Fragment() {
                     qr?.frameWidth ?: 640,
                     qr?.frameHeight ?: 480
                 )
-                val dir = File(requireContext().cacheDir, "scans")
-                val rawPath = ScanSession.saveBitmap(dir, "raw", raw, 92)
-                val procPath = ScanSession.saveBitmap(dir, "page", processed, deviceTier.jpegQuality)
-                withContext(Dispatchers.Main) {
-                    isCapturing = false
-                    if (_binding == null) return@withContext
-                    if (rawPath != null && procPath != null) {
-                        ScanSession.addPage(
-                            ScanSession.PageEntry(
-                                rawPath = rawPath,
-                                processedPath = procPath,
-                                quad = qr?.points,
-                                quadWidth = qr?.frameWidth ?: 0,
-                                quadHeight = qr?.frameHeight ?: 0
-                            )
-                        )
-                        updateBatchBadge()
-                        binding.textHint.text = getString(R.string.align_document)
-                        if (!viewModel.batchMode.value) {
-                            findNavController().navigate(R.id.action_scanner_to_editor)
-                        }
-                    } else {
-                        binding.textHint.text = getString(R.string.align_document)
-                        Toast.makeText(requireContext(), getString(R.string.capture_failed), Toast.LENGTH_SHORT).show()
-                    }
-                }
+                handleProcessedCapture(raw, processed, qr?.points, qr?.frameWidth ?: 0, qr?.frameHeight ?: 0)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     isCapturing = false
@@ -247,7 +259,10 @@ class ScannerFragment : Fragment() {
                 }
             } finally {
                 BitmapUtils.safeRecycle(raw)
-                BitmapUtils.safeRecycle(processed)
+                // Only recycle processed if it wasn't retained as pendingIdFront
+                if (processed !== pendingIdFront) {
+                    BitmapUtils.safeRecycle(processed)
+                }
             }
         }
     }
@@ -270,27 +285,7 @@ class ScannerFragment : Fragment() {
                     bmp.width,
                     bmp.height
                 )
-                val dir = File(requireContext().cacheDir, "scans")
-                val rawPath = ScanSession.saveBitmap(dir, "raw", bmp, 92)
-                val procPath = ScanSession.saveBitmap(dir, "page", processed, deviceTier.jpegQuality)
-                withContext(Dispatchers.Main) {
-                    if (_binding == null) return@withContext
-                    if (rawPath != null && procPath != null) {
-                        ScanSession.addPage(
-                            ScanSession.PageEntry(
-                                rawPath = rawPath,
-                                processedPath = procPath,
-                                quad = detected,
-                                quadWidth = bmp.width,
-                                quadHeight = bmp.height
-                            )
-                        )
-                        updateBatchBadge()
-                        if (!viewModel.batchMode.value) {
-                            findNavController().navigate(R.id.action_scanner_to_editor)
-                        }
-                    }
-                }
+                handleProcessedCapture(bmp, processed, detected, bmp.width, bmp.height)
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     if (_binding != null) {
@@ -299,7 +294,78 @@ class ScannerFragment : Fragment() {
                 }
             } finally {
                 BitmapUtils.safeRecycle(bmp)
-                BitmapUtils.safeRecycle(processed)
+                if (processed !== pendingIdFront) {
+                    BitmapUtils.safeRecycle(processed)
+                }
+            }
+        }
+    }
+
+    private suspend fun handleProcessedCapture(
+        raw: Bitmap,
+        processed: Bitmap,
+        quad: Array<PointF>?,
+        quadW: Int,
+        quadH: Int
+    ) {
+        val dir = File(requireContext().cacheDir, "scans")
+        if (isIdCardMode) {
+            val front = pendingIdFront
+            if (front == null) {
+                pendingIdFront = processed
+                withContext(Dispatchers.Main) {
+                    isCapturing = false
+                    if (_binding != null) {
+                        binding.textHint.text = getString(R.string.scan_id_back)
+                    }
+                }
+                return
+            } else {
+                val combined = viewModel.openCv.compositeIdCardA4(front, processed)
+                BitmapUtils.safeRecycle(front)
+                pendingIdFront = null
+                val rawPath = ScanSession.saveBitmap(dir, "raw", combined, 92)
+                val procPath = ScanSession.saveBitmap(dir, "page", combined, deviceTier.jpegQuality)
+                BitmapUtils.safeRecycle(combined)
+                withContext(Dispatchers.Main) {
+                    isCapturing = false
+                    if (_binding == null) return@withContext
+                    if (rawPath != null && procPath != null) {
+                        ScanSession.addPage(ScanSession.PageEntry(rawPath = rawPath, processedPath = procPath))
+                        updateBatchBadge()
+                        binding.textHint.text = getString(R.string.scan_id_front)
+                        if (!viewModel.batchMode.value) {
+                            findNavController().navigate(R.id.action_scanner_to_editor)
+                        }
+                    }
+                }
+                return
+            }
+        }
+
+        val rawPath = ScanSession.saveBitmap(dir, "raw", raw, 92)
+        val procPath = ScanSession.saveBitmap(dir, "page", processed, deviceTier.jpegQuality)
+        withContext(Dispatchers.Main) {
+            isCapturing = false
+            if (_binding == null) return@withContext
+            if (rawPath != null && procPath != null) {
+                ScanSession.addPage(
+                    ScanSession.PageEntry(
+                        rawPath = rawPath,
+                        processedPath = procPath,
+                        quad = quad,
+                        quadWidth = quadW,
+                        quadHeight = quadH
+                    )
+                )
+                updateBatchBadge()
+                binding.textHint.text = getString(R.string.align_document)
+                if (!viewModel.batchMode.value) {
+                    findNavController().navigate(R.id.action_scanner_to_editor)
+                }
+            } else {
+                binding.textHint.text = getString(R.string.align_document)
+                Toast.makeText(requireContext(), getString(R.string.capture_failed), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -319,6 +385,8 @@ class ScannerFragment : Fragment() {
 
     override fun onDestroyView() {
         cameraManager.stop()
+        BitmapUtils.safeRecycle(pendingIdFront)
+        pendingIdFront = null
         super.onDestroyView()
         _binding = null
     }

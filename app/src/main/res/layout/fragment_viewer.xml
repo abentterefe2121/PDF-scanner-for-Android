@@ -20,12 +20,11 @@
         app:strokeColor="@color/outline"
         app:strokeWidth="1dp">
 
-        <ImageView
+        <com.pdfscanner.app.ui.viewer.ZoomableImageView
             android:id="@+id/image_pdf"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="6dp"
-            android:scaleType="fitCenter" />
+            android:padding="6dp" />
     </com.google.android.material.card.MaterialCardView>
 
     <LinearLayout

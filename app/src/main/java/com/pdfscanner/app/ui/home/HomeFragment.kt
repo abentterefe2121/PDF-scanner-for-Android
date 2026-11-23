@@ -65,9 +65,14 @@ class HomeFragment : Fragment() {
 
         adapter = DocumentAdapter(
             onClick = { doc ->
-                val args = Bundle().apply { putLong("documentId", doc.id) }
-                findNavController().navigate(R.id.action_home_to_viewer, args)
+                if (viewModel.selectedIds.value.isNotEmpty()) {
+                    viewModel.toggleSelect(doc.id)
+                } else {
+                    val args = Bundle().apply { putLong("documentId", doc.id) }
+                    findNavController().navigate(R.id.action_home_to_viewer, args)
+                }
             },
+            onLongClick = { doc -> viewModel.toggleSelect(doc.id) },
             onMore = { doc, anchor -> showDocMenu(doc, anchor) }
         )
         binding.recyclerDocuments.layoutManager = GridLayoutManager(requireContext(), 2)
@@ -85,6 +90,23 @@ class HomeFragment : Fragment() {
         binding.chipFolderReceipts.setOnClickListener { viewModel.setFolder("Receipts") }
         binding.chipFolderSchool.setOnClickListener { viewModel.setFolder("School") }
 
+        binding.buttonCancelSelect.setOnClickListener { viewModel.clearSelection() }
+        binding.buttonDeleteSelected.setOnClickListener {
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.delete)
+                .setMessage(R.string.confirm_delete)
+                .setPositiveButton(R.string.delete) { _, _ -> viewModel.deleteSelected() }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
+        binding.buttonMergeSelected.setOnClickListener {
+            viewModel.mergeSelected { merged ->
+                if (merged > 0 && _binding != null) {
+                    Toast.makeText(requireContext(), getString(R.string.pdf_merged, merged), Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
         binding.editSearch.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -95,10 +117,22 @@ class HomeFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                viewModel.documents.collect { docs ->
-                    adapter.submit(docs)
-                    binding.cardEmpty.visibility = if (docs.isEmpty()) View.VISIBLE else View.GONE
-                    binding.recyclerDocuments.visibility = if (docs.isEmpty()) View.GONE else View.VISIBLE
+                launch {
+                    viewModel.documents.collect { docs ->
+                        adapter.submit(docs)
+                        binding.cardEmpty.visibility = if (docs.isEmpty()) View.VISIBLE else View.GONE
+                        binding.recyclerDocuments.visibility = if (docs.isEmpty()) View.GONE else View.VISIBLE
+                    }
+                }
+                launch {
+                    viewModel.selectedIds.collect { ids ->
+                        adapter.setSelectedIds(ids)
+                        val selecting = ids.isNotEmpty()
+                        binding.cardSelectionBar.visibility = if (selecting) View.VISIBLE else View.GONE
+                        binding.fabScan.visibility = if (selecting) View.GONE else View.VISIBLE
+                        binding.textSelectedCount.text = getString(R.string.selected_count, ids.size)
+                        binding.buttonMergeSelected.isEnabled = ids.size >= 2
+                    }
                 }
             }
         }
