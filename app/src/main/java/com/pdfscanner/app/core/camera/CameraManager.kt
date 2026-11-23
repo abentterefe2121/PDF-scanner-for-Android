@@ -3,9 +3,9 @@ package com.pdfscanner.app.core.camera
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.ImageFormat
-import android.graphics.Rect
-import android.graphics.YuvImage
+import android.graphics.Matrix
+import android.util.Size
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
@@ -14,10 +14,11 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.LifecycleOwner
 import com.pdfscanner.app.core.common.DeviceTier
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.concurrent.Executors
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,12 +28,9 @@ import kotlin.coroutines.suspendCoroutine
 
 /**
  * CameraX wrapper — tuned for low-end speed.
- *
- * Magic tricks:
- * - Preview + Analysis (640x480) + Capture are separate use cases.
- * - Analysis uses KEEP_ONLY_LATEST so we never queue frames on slow CPUs.
- * - Full-res capture only on shutter tap, not continuously.
- * - Analysis runs on a single background executor, released on stop().
+ * - Preview + Analysis (RGBA_8888 640x480) + Capture separate use cases.
+ * - Analysis KEEP_ONLY_LATEST, single executor.
+ * - Capture writes a temp file then decodes with EXIF rotation (no OOM).
  */
 @Singleton
 class CameraManager @Inject constructor(
@@ -41,11 +39,16 @@ class CameraManager @Inject constructor(
 ) {
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageCapture: ImageCapture? = null
+    private var camera: Camera? = null
     private val analysisExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "scanner-analysis")
     }
+    private val captureExecutor = Executors.newSingleThreadExecutor { r ->
+        Thread(r, "scanner-capture")
+    }
 
     @Volatile var onFrame: ((Bitmap) -> Unit)? = null
+    @Volatile var isTorchOn: Boolean = false
 
     fun start(
         lifecycleOwner: LifecycleOwner,
@@ -57,26 +60,23 @@ class CameraManager @Inject constructor(
             val provider = providerFuture.get()
             cameraProvider = provider
 
+            val analysisSize = Size(deviceTier.analysisWidth, deviceTier.analysisHeight)
             val preview = Preview.Builder()
-                .setTargetResolution(
-                    android.util.Size(deviceTier.analysisWidth, deviceTier.analysisHeight)
-                )
+                .setTargetResolution(analysisSize)
                 .build()
                 .also { it.setSurfaceProvider(previewView.surfaceProvider) }
 
             val analysis = ImageAnalysis.Builder()
-                .setTargetResolution(
-                    android.util.Size(deviceTier.analysisWidth, deviceTier.analysisHeight)
-                )
+                .setTargetResolution(analysisSize)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
                 .also { useCase ->
                     useCase.setAnalyzer(analysisExecutor) { imageProxy ->
                         try {
-                            val bmp = imageProxyToBitmap(imageProxy)
+                            val bmp = imageProxyToRotatedBitmap(imageProxy)
                             if (bmp != null) onFrame?.invoke(bmp)
                         } catch (_: Exception) {
-                            // Drop frame on low-end under load — next frame will come.
                         } finally {
                             imageProxy.close()
                         }
@@ -88,29 +88,42 @@ class CameraManager @Inject constructor(
                 .build()
 
             val selector = CameraSelector.DEFAULT_BACK_CAMERA
-            try {
-                provider.unbindAll()
-                provider.bindToLifecycle(lifecycleOwner, selector, preview, analysis, imageCapture)
-                onReady()
-            } catch (e: Exception) {
-                // Camera unavailable (emulator without camera, permission denied, etc.)
-                // UI should show gallery import fallback.
-                throw e
-            }
+            provider.unbindAll()
+            camera = provider.bindToLifecycle(lifecycleOwner, selector, preview, analysis, imageCapture)
+            onReady()
         }, ContextCompat.getMainExecutor(context))
     }
 
+    fun setTorch(on: Boolean) {
+        isTorchOn = on
+        try {
+            camera?.cameraControl?.enableTorch(on)
+        } catch (_: Exception) {}
+    }
+
+    /** Capture a photo, apply EXIF orientation, return Bitmap. Suspends until done. */
     suspend fun takePicture(): Bitmap = suspendCoroutine { cont ->
         val capture = imageCapture
         if (capture == null) {
             cont.resumeWithException(IllegalStateException("Camera not started"))
             return@suspendCoroutine
         }
+        val dir = File(context.cacheDir, "captures").apply { mkdirs() }
+        val file = File(dir, "capture_${System.currentTimeMillis()}.jpg")
+        val options = ImageCapture.OutputFileOptions.Builder(file).build()
         capture.takePicture(
-            ContextCompat.getMainExecutor(context),
-            object : ImageCapture.OnImageCapturedCallback() {
-                override fun onCaptureSuccess(image: androidx.camera.core.ImageCapture.OutputFileResults) {
-                    super.onCaptureSuccess(image)
+            options,
+            captureExecutor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                    try {
+                        val bmp = decodeWithExif(file)
+                        file.delete()
+                        if (bmp != null) cont.resume(bmp)
+                        else cont.resumeWithException(IllegalStateException("Decode failed"))
+                    } catch (e: Exception) {
+                        cont.resumeWithException(e)
+                    }
                 }
 
                 override fun onError(exception: ImageCaptureException) {
@@ -118,39 +131,42 @@ class CameraManager @Inject constructor(
                 }
             }
         )
-        // NOTE: For Phase 1 we use in-memory capture via ImageAnalysis frame + high-res path.
-        // Full implementation will use takePicture with file output + BitmapFactory decode.
-        // This stub resumes with a placeholder to keep the API stable.
-        // TODO(Phase 1): Replace with file-based capture for 2MP quality.
-        cont.resume(Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888))
     }
 
     fun stop() {
-        try {
-            cameraProvider?.unbindAll()
-        } catch (_: Exception) {
-        }
+        try { cameraProvider?.unbindAll() } catch (_: Exception) {}
         cameraProvider = null
         imageCapture = null
+        camera = null
+        isTorchOn = false
     }
 
-    private fun imageProxyToBitmap(image: ImageProxy): Bitmap? {
-        val yuvImage = YuvImage(
-            image.planes[0].buffer,
-            image.format,
-            image.width,
-            image.height,
-            null
+    private fun imageProxyToRotatedBitmap(imageProxy: ImageProxy): Bitmap? {
+        val raw = imageProxy.toBitmap()
+        val rot = imageProxy.imageInfo.rotationDegrees
+        if (rot == 0) return raw
+        val matrix = Matrix().apply { postRotate(rot.toFloat()) }
+        val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+        if (rotated !== raw) raw.recycle()
+        return rotated
+    }
+
+    private fun decodeWithExif(file: File): Bitmap? {
+        val bmp = BitmapFactory.decodeFile(file.absolutePath) ?: return null
+        val exif = try { ExifInterface(file.absolutePath) } catch (_: Exception) { return bmp }
+        val orientation = exif.getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL
         )
-        val out = ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 80, out)
-        val bytes = out.toByteArray()
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-    }
-
-    @Suppress("unused")
-    private fun formatName(format: Int): String = when (format) {
-        ImageFormat.YUV_420_888 -> "YUV_420_888"
-        else -> "UNKNOWN_$format"
+        val degrees = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> return bmp
+        }
+        val matrix = Matrix().apply { postRotate(degrees) }
+        val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+        if (rotated !== bmp) bmp.recycle()
+        return rotated
     }
 }

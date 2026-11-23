@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.util.Log
@@ -19,15 +20,8 @@ import javax.inject.Singleton
  *
  * Why PdfDocument:
  * - Lightweight, zero extra APK size, works on 2GB RAM.
- * - We control JPEG compression per page (adaptive quality by DeviceTier).
- * - We embed an invisible OCR text layer so PDFs are searchable + copyable.
- *
- * Amharic font:
- * - Ethiopic text needs Noto Sans Ethiopic, otherwise the text layer is broken.
- * - We try to load `fonts/NotoSansEthiopic-Regular.ttf` from assets (subset, Phase 3).
- * - Fallback to default typeface if font missing (image still readable, text may not render).
- *
- * Page size: A4 at ~200 DPI (good balance of quality vs file size <500KB/page).
+ * - Scales page bitmaps cleanly onto A4 (595x842 pt) with RectF + bilinear filtering.
+ * - Embeds an invisible OCR text layer so PDFs are searchable + copyable.
  */
 @Singleton
 class PdfGenerator @Inject constructor(
@@ -43,6 +37,7 @@ class PdfGenerator @Inject constructor(
         if (pages.isEmpty()) return null
         val document = PdfDocument()
         val ethiopicTypeface = loadEthiopicTypeface()
+        val imagePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
 
         try {
             for (page in pages) {
@@ -54,37 +49,41 @@ class PdfGenerator @Inject constructor(
                 val pdfPage = document.startPage(pageInfo)
                 val canvas: Canvas = pdfPage.canvas
 
-                // Draw page image (scaled to fit A4 with small margin)
-                val margin = 24f
+                val margin = 18f
                 val availW = pageInfo.pageWidth - margin * 2
                 val availH = pageInfo.pageHeight - margin * 2
-                val bmpW = page.bitmap.width.toFloat()
-                val bmpH = page.bitmap.height.toFloat()
+                val bmpW = maxOf(page.bitmap.width, 1).toFloat()
+                val bmpH = maxOf(page.bitmap.height, 1).toFloat()
                 val scale = minOf(availW / bmpW, availH / bmpH)
                 val drawW = bmpW * scale
                 val drawH = bmpH * scale
-                val left = (pageInfo.pageWidth - drawW) / 2
-                val top = (pageInfo.pageHeight - drawH) / 2
-                canvas.drawBitmap(page.bitmap, left, top, null)
+                val left = (pageInfo.pageWidth - drawW) / 2f
+                val top = (pageInfo.pageHeight - drawH) / 2f
+                val destRect = RectF(left, top, left + drawW, top + drawH)
+                canvas.drawBitmap(page.bitmap, null, destRect, imagePaint)
 
                 // Invisible OCR text layer (searchable PDF)
                 if (page.ocrText.isNotBlank()) {
                     val paint = Paint().apply {
                         typeface = ethiopicTypeface
-                        textSize = 1f // tiny but selectable; real apps use per-word boxes
-                        alpha = 0 // invisible
+                        textSize = 8f
+                        alpha = 0
                     }
-                    // Simple: draw text at top-left invisible. Phase 3 adds word boxes.
-                    canvas.drawText(page.ocrText.take(500), margin, margin, paint)
+                    val lines = page.ocrText.lines().take(60)
+                    var y = top + 12f
+                    for (line in lines) {
+                        if (y > top + drawH) break
+                        if (line.isNotBlank()) {
+                            canvas.drawText(line.take(120), left + 4f, y, paint)
+                        }
+                        y += 12f
+                    }
                 }
 
                 document.finishPage(pdfPage)
             }
 
-            // NOTE: Framework PdfDocument has no DocumentInfo API.
-            // Title is kept for logging / Room metadata. Phase 5 (PDF/A)
-            // will add real metadata via a lightweight writer if needed.
-            Log.i(TAG, "Generating PDF titled: $title")
+            Log.i(TAG, "Generating PDF titled: $title (tier=${deviceTier.tier})")
 
             FileOutputStream(outputFile).use { out ->
                 document.writeTo(out)
@@ -101,11 +100,8 @@ class PdfGenerator @Inject constructor(
 
     private fun loadEthiopicTypeface(): Typeface {
         return try {
-            val assetManager = context.assets
-            val stream = assetManager.open("fonts/NotoSansEthiopic-Regular.ttf")
-            Typeface.createFromStream(stream, null)
+            Typeface.createFromAsset(context.assets, "fonts/NotoSansEthiopic-Regular.ttf")
         } catch (_: Exception) {
-            // Font not bundled yet (Phase 3) — fallback.
             Typeface.DEFAULT
         }
     }
