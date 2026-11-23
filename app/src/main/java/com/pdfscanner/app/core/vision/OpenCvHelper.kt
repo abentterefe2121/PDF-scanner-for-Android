@@ -17,12 +17,14 @@ import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.math.hypot
+import kotlin.math.max
 
 /**
- * OpenCV helper — lazy-loaded ONLY when Scanner opens.
+ * OpenCV 4.14.0 helper — lazy-loaded ONLY when Scanner/Editor opens.
  * Real pipeline: downscale -> gray -> blur -> Canny -> contours -> quad -> warp -> enhance.
- * Ethiopic tuning: larger adaptive block so dense fidel strokes survive.
- * All Mats released immediately (low-end native memory).
+ * Computes real destination width/height from quad edge lengths so cropped pages keep true aspect ratio.
+ * Ethiopic tuning: larger adaptive block (51) so dense fidel strokes survive cleanly.
  */
 @Singleton
 class OpenCvHelper @Inject constructor(
@@ -51,7 +53,7 @@ class OpenCvHelper @Inject constructor(
 
     enum class Filter { ORIGINAL, MAGIC, LIGHTEN, BLACK_WHITE }
 
-    /** Live edge detection on analysis frame. Returns quad in frame coords or null. */
+    /** Live edge detection on analysis frame. Returns ordered quad [TL, TR, BR, BL] in frame coords or null. */
     fun detectDocumentQuad(frame: Bitmap): Array<PointF>? {
         if (!ensureLoaded()) return null
         var mat: Mat? = null
@@ -167,14 +169,20 @@ class OpenCvHelper @Inject constructor(
             if (quad != null && quad.size == 4 && quadFrameWidth > 0 && quadFrameHeight > 0) {
                 val scaleX = src.width.toFloat() / quadFrameWidth.toFloat()
                 val scaleY = src.height.toFloat() / quadFrameHeight.toFloat()
-                val srcPts = MatOfPoint2f(
-                    Point((quad[0].x * scaleX).toDouble(), (quad[0].y * scaleY).toDouble()),
-                    Point((quad[1].x * scaleX).toDouble(), (quad[1].y * scaleY).toDouble()),
-                    Point((quad[2].x * scaleX).toDouble(), (quad[2].y * scaleY).toDouble()),
-                    Point((quad[3].x * scaleX).toDouble(), (quad[3].y * scaleY).toDouble())
-                )
-                val w = maxOf(src.width, 1)
-                val h = maxOf(src.height, 1)
+                val p0 = Point((quad[0].x * scaleX).toDouble(), (quad[0].y * scaleY).toDouble())
+                val p1 = Point((quad[1].x * scaleX).toDouble(), (quad[1].y * scaleY).toDouble())
+                val p2 = Point((quad[2].x * scaleX).toDouble(), (quad[2].y * scaleY).toDouble())
+                val p3 = Point((quad[3].x * scaleX).toDouble(), (quad[3].y * scaleY).toDouble())
+
+                val widthTop = hypot(p1.x - p0.x, p1.y - p0.y)
+                val widthBottom = hypot(p2.x - p3.x, p2.y - p3.y)
+                val heightLeft = hypot(p3.x - p0.x, p3.y - p0.y)
+                val heightRight = hypot(p2.x - p1.x, p2.y - p1.y)
+
+                val w = max(max(widthTop, widthBottom).toInt(), 64)
+                val h = max(max(heightLeft, heightRight).toInt(), 64)
+
+                val srcPts = MatOfPoint2f(p0, p1, p2, p3)
                 val dstPts = MatOfPoint2f(
                     Point(0.0, 0.0), Point(w.toDouble(), 0.0),
                     Point(w.toDouble(), h.toDouble()), Point(0.0, h.toDouble())
@@ -202,7 +210,6 @@ class OpenCvHelper @Inject constructor(
                 Filter.ORIGINAL -> warped.clone()
                 Filter.BLACK_WHITE -> {
                     val bw = Mat()
-                    // Larger block (51) so dense Ethiopic fidel strokes survive cleanly.
                     Imgproc.adaptiveThreshold(
                         gray, bw, 255.0,
                         Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY, 51, 10.0
@@ -213,7 +220,6 @@ class OpenCvHelper @Inject constructor(
                     rgba
                 }
                 Filter.LIGHTEN -> {
-                    // Shadow removal: divide by blurred background scaled back to 0..255.
                     val bg = Mat()
                     Imgproc.GaussianBlur(gray, bg, Size(0.0, 0.0), 50.0)
                     val div = Mat()

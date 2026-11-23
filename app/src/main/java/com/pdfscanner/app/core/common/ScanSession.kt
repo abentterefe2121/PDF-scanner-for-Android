@@ -9,7 +9,7 @@ import java.io.FileOutputStream
 /**
  * Holds the current scan session (list of page entries).
  * File-based (not in-memory Bitmaps) to avoid OOM on 2GB devices.
- * Keeps rawPath + processedPath so filter changes are non-destructive.
+ * Keeps rawPath + processedPath so filter & crop changes are non-destructive.
  */
 object ScanSession {
 
@@ -37,7 +37,7 @@ object ScanSession {
         _pages.add(entry)
     }
 
-    fun updateProcessed(index: Int, newProcessedPath: String, newRawPath: String? = null) {
+    fun updateProcessed(index: Int, newProcessedPath: String, newRawPath: String? = null, clearQuad: Boolean = false) {
         if (index !in _pages.indices) return
         val old = _pages[index]
         if (old.processedPath != newProcessedPath) {
@@ -48,7 +48,30 @@ object ScanSession {
         }
         _pages[index] = old.copy(
             rawPath = newRawPath ?: old.rawPath,
-            processedPath = newProcessedPath
+            processedPath = newProcessedPath,
+            quad = if (clearQuad) null else old.quad,
+            quadWidth = if (clearQuad) 0 else old.quadWidth,
+            quadHeight = if (clearQuad) 0 else old.quadHeight
+        )
+    }
+
+    fun updateCrop(
+        index: Int,
+        quad: Array<PointF>?,
+        quadWidth: Int,
+        quadHeight: Int,
+        newProcessedPath: String
+    ) {
+        if (index !in _pages.indices) return
+        val old = _pages[index]
+        if (old.processedPath != newProcessedPath) {
+            try { File(old.processedPath).delete() } catch (_: Exception) {}
+        }
+        _pages[index] = old.copy(
+            processedPath = newProcessedPath,
+            quad = quad,
+            quadWidth = quadWidth,
+            quadHeight = quadHeight
         )
     }
 

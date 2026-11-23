@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.PointF
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.pdfscanner.app.core.common.SettingsPrefs
 import com.pdfscanner.app.core.vision.OpenCvHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -11,6 +12,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -18,7 +20,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ScannerViewModel @Inject constructor(
-    val openCv: OpenCvHelper
+    val openCv: OpenCvHelper,
+    private val prefs: SettingsPrefs
 ) : ViewModel() {
 
     data class QuadResult(
@@ -39,6 +42,9 @@ class ScannerViewModel @Inject constructor(
     private val _autoCapture = MutableStateFlow(true)
     val autoCapture: StateFlow<Boolean> = _autoCapture.asStateFlow()
 
+    private val _batchMode = MutableStateFlow(false)
+    val batchMode: StateFlow<Boolean> = _batchMode.asStateFlow()
+
     private val _captureEvent = Channel<Unit>(Channel.BUFFERED)
     val captureEvent = _captureEvent.receiveAsFlow()
 
@@ -46,10 +52,26 @@ class ScannerViewModel @Inject constructor(
     @Volatile private var lastProcessMs = 0L
     private var lastQuad: Array<PointF>? = null
 
-    fun setFilter(f: OpenCvHelper.Filter) { _filter.value = f }
-    fun setAutoCapture(on: Boolean) { _autoCapture.value = on }
+    init {
+        viewModelScope.launch {
+            _filter.value = prefs.defaultFilter.first()
+            _autoCapture.value = prefs.autoCapture.first()
+            _batchMode.value = prefs.batchMode.first()
+        }
+    }
 
-    /** Called from CameraManager onFrame (analysis thread). Throttled to ~3fps for low-end. */
+    fun toggleAutoCapture() {
+        val next = !_autoCapture.value
+        _autoCapture.value = next
+        viewModelScope.launch { prefs.setAutoCapture(next) }
+    }
+
+    fun toggleBatchMode() {
+        val next = !_batchMode.value
+        _batchMode.value = next
+        viewModelScope.launch { prefs.setBatchMode(next) }
+    }
+
     fun onFrame(frame: Bitmap) {
         val now = System.currentTimeMillis()
         if (now - lastProcessMs < 300) {
@@ -73,7 +95,7 @@ class ScannerViewModel @Inject constructor(
                         stableFrames = 0
                     }
                     lastQuad = detected
-                    val stable = stableFrames >= 4 // ~1.2s stable
+                    val stable = stableFrames >= 4
                     _isStable.value = stable
                     if (stable && _autoCapture.value) {
                         stableFrames = 0
@@ -81,7 +103,6 @@ class ScannerViewModel @Inject constructor(
                     }
                 }
             } catch (_: Exception) {
-                // Drop frame, next will retry.
             } finally {
                 try { frame.recycle() } catch (_: Exception) {}
             }

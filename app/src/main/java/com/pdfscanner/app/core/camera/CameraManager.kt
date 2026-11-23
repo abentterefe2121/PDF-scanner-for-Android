@@ -12,6 +12,8 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
 import androidx.exifinterface.media.ExifInterface
@@ -27,7 +29,7 @@ import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
 /**
- * CameraX wrapper — tuned for low-end speed.
+ * CameraX wrapper — tuned for low-end speed (CameraX 1.6.1 ResolutionSelector).
  * - Preview + Analysis (RGBA_8888 640x480) + Capture separate use cases.
  * - Analysis KEEP_ONLY_LATEST, single executor.
  * - Capture writes a temp file then decodes with EXIF rotation (no OOM).
@@ -61,13 +63,22 @@ class CameraManager @Inject constructor(
             cameraProvider = provider
 
             val analysisSize = Size(deviceTier.analysisWidth, deviceTier.analysisHeight)
-            val preview = Preview.Builder()
-                .setTargetResolution(analysisSize)
+            val resolutionSelector = ResolutionSelector.Builder()
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        analysisSize,
+                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                    )
+                )
                 .build()
-                .also { it.setSurfaceProvider(previewView.surfaceProvider) }
+
+            val preview = Preview.Builder()
+                .setResolutionSelector(resolutionSelector)
+                .build()
+                .also { it.surfaceProvider = previewView.surfaceProvider }
 
             val analysis = ImageAnalysis.Builder()
-                .setTargetResolution(analysisSize)
+                .setResolutionSelector(resolutionSelector)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()

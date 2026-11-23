@@ -15,11 +15,10 @@
             app:destination="@id/scannerFragment" />
         <action
             android:id="@+id/action_home_to_viewer"
-            app:destination="@id/viewerFragment">
-            <argument
-                android:name="documentId"
-                app:argType="long" />
-        </action>
+            app:destination="@id/viewerFragment" />
+        <action
+            android:id="@+id/action_home_to_settings"
+            app:destination="@id/settingsFragment" />
     </fragment>
 
     <fragment
@@ -41,6 +40,9 @@
             android:id="@+id/action_editor_to_scanner"
             app:destination="@id/scannerFragment" />
         <action
+            android:id="@+id/action_editor_to_crop"
+            app:destination="@id/cropFragment" />
+        <action
             android:id="@+id/action_editor_to_home"
             app:destination="@id/homeFragment"
             app:popUpTo="@id/homeFragment"
@@ -48,12 +50,20 @@
     </fragment>
 
     <fragment
+        android:id="@+id/cropFragment"
+        android:name="com.pdfscanner.app.ui.editor.CropFragment"
+        android:label="@string/crop"
+        tools:layout="@layout/fragment_crop" />
+
+    <fragment
         android:id="@+id/viewerFragment"
         android:name="com.pdfscanner.app.ui.viewer.ViewerFragment"
         android:label="@string/viewer"
-        tools:layout="@layout/fragment_viewer">
-        <argument
-            android:name="documentId"
-            app:argType="long" />
-    </fragment>
+        tools:layout="@layout/fragment_viewer" />
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.pdfscanner.app.ui.settings.SettingsFragment"
+        android:label="@string/settings"
+        tools:layout="@layout/fragment_settings" />
 </navigation>

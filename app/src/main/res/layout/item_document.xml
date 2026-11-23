@@ -4,41 +4,92 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_margin="6dp"
-    app:cardElevation="2dp">
+    app:cardBackgroundColor="@color/surface_container"
+    app:cardCornerRadius="16dp"
+    app:cardElevation="2dp"
+    app:strokeColor="@color/outline"
+    app:strokeWidth="1dp">
 
     <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="12dp">
+        android:padding="10dp">
 
-        <ImageView
-            android:id="@+id/image_thumb"
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/card_thumb"
             android:layout_width="0dp"
-            android:layout_height="120dp"
-            android:background="@color/surface_variant"
-            android:scaleType="centerCrop"
+            android:layout_height="156dp"
+            app:cardBackgroundColor="@color/surface_variant"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="0dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent" />
+            app:layout_constraintTop_toTopOf="parent"
+            app:strokeWidth="0dp">
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
+
+                <ImageView
+                    android:id="@+id/image_thumb"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop" />
+
+                <TextView
+                    android:id="@+id/text_page_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="bottom|end"
+                    android:layout_margin="8dp"
+                    android:background="@drawable/bg_badge"
+                    android:paddingHorizontal="8dp"
+                    android:paddingVertical="3dp"
+                    android:text="1p"
+                    android:textColor="@android:color/white"
+                    android:textSize="11sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:id="@+id/text_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
             android:ellipsize="end"
             android:maxLines="1"
             android:textAppearance="?attr/textAppearanceTitleSmall"
-            app:layout_constraintEnd_toEndOf="parent"
+            android:textColor="@color/on_surface"
+            android:textStyle="bold"
+            app:layout_constraintEnd_toStartOf="@id/button_more"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/image_thumb" />
+            app:layout_constraintTop_toBottomOf="@id/card_thumb" />
 
         <TextView
             android:id="@+id/text_meta"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:ellipsize="end"
+            android:maxLines="1"
             android:textAppearance="?attr/textAppearanceBodySmall"
-            app:layout_constraintEnd_toEndOf="parent"
+            android:textColor="@color/on_surface_variant"
+            app:layout_constraintEnd_toStartOf="@id/button_more"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/text_title" />
+
+        <ImageButton
+            android:id="@+id/button_more"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/more"
+            android:src="@drawable/ic_more"
+            app:layout_constraintBottom_toBottomOf="@id/text_meta"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="@id/text_title"
+            app:tint="@color/on_surface_variant" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 </com.google.android.material.card.MaterialCardView>

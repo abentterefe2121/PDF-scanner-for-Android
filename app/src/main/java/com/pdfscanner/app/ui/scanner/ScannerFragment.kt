@@ -74,9 +74,16 @@ class ScannerFragment : Fragment() {
         binding.buttonCapture.setOnClickListener { capture() }
         binding.buttonGallery.setOnClickListener { galleryLauncher.launch("image/*") }
         binding.buttonFlash.setOnClickListener {
-            val next = !cameraManager.isTorchOn
-            cameraManager.setTorch(next)
+            cameraManager.setTorch(!cameraManager.isTorchOn)
         }
+        binding.buttonAutoToggle.setOnClickListener { viewModel.toggleAutoCapture() }
+        binding.buttonBatchToggle.setOnClickListener { viewModel.toggleBatchMode() }
+        binding.buttonDoneBatch.setOnClickListener {
+            if (ScanSession.pages.isNotEmpty()) {
+                findNavController().navigate(R.id.action_scanner_to_editor)
+            }
+        }
+        updateBatchBadge()
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -86,7 +93,32 @@ class ScannerFragment : Fragment() {
                         updateOverlay(qr)
                     }
                 }
-                launch { viewModel.isStable.collect { binding.edgeOverlay.isStable = it } }
+                launch {
+                    viewModel.isStable.collect { stable ->
+                        binding.edgeOverlay.isStable = stable
+                        if (!isCapturing) {
+                            binding.textHint.text = if (stable) {
+                                getString(R.string.hold_steady)
+                            } else {
+                                getString(R.string.align_document)
+                            }
+                        }
+                    }
+                }
+                launch {
+                    viewModel.autoCapture.collect { on ->
+                        binding.buttonAutoToggle.text = getString(
+                            if (on) R.string.auto_capture_on else R.string.auto_capture_off
+                        )
+                    }
+                }
+                launch {
+                    viewModel.batchMode.collect { on ->
+                        binding.buttonBatchToggle.text = getString(
+                            if (on) R.string.batch_on else R.string.batch_off
+                        )
+                    }
+                }
                 launch {
                     viewModel.captureEvent.collect {
                         vibrate()
@@ -103,6 +135,16 @@ class ScannerFragment : Fragment() {
             startCamera()
         } else {
             permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    private fun updateBatchBadge() {
+        val count = ScanSession.pages.size
+        if (count > 0) {
+            binding.buttonDoneBatch.visibility = View.VISIBLE
+            binding.buttonDoneBatch.text = getString(R.string.done_pages, count)
+        } else {
+            binding.buttonDoneBatch.visibility = View.INVISIBLE
         }
     }
 
@@ -163,6 +205,7 @@ class ScannerFragment : Fragment() {
                 val procPath = ScanSession.saveBitmap(dir, "page", processed, deviceTier.jpegQuality)
                 withContext(Dispatchers.Main) {
                     isCapturing = false
+                    if (_binding == null) return@withContext
                     if (rawPath != null && procPath != null) {
                         ScanSession.addPage(
                             ScanSession.PageEntry(
@@ -173,8 +216,11 @@ class ScannerFragment : Fragment() {
                                 quadHeight = qr?.frameHeight ?: 0
                             )
                         )
+                        updateBatchBadge()
                         binding.textHint.text = getString(R.string.align_document)
-                        findNavController().navigate(R.id.action_scanner_to_editor)
+                        if (!viewModel.batchMode.value) {
+                            findNavController().navigate(R.id.action_scanner_to_editor)
+                        }
                     } else {
                         binding.textHint.text = getString(R.string.align_document)
                         Toast.makeText(requireContext(), getString(R.string.capture_failed), Toast.LENGTH_SHORT).show()
@@ -183,8 +229,10 @@ class ScannerFragment : Fragment() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     isCapturing = false
-                    binding.textHint.text = getString(R.string.align_document)
-                    Toast.makeText(requireContext(), "${getString(R.string.capture_failed)}: ${e.message}", Toast.LENGTH_SHORT).show()
+                    if (_binding != null) {
+                        binding.textHint.text = getString(R.string.align_document)
+                        Toast.makeText(requireContext(), "${getString(R.string.capture_failed)}: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
             } finally {
                 BitmapUtils.safeRecycle(raw)
@@ -230,7 +278,10 @@ class ScannerFragment : Fragment() {
                                 quadHeight = scaled.height
                             )
                         )
-                        findNavController().navigate(R.id.action_scanner_to_editor)
+                        updateBatchBadge()
+                        if (!viewModel.batchMode.value) {
+                            findNavController().navigate(R.id.action_scanner_to_editor)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -251,6 +302,11 @@ class ScannerFragment : Fragment() {
             val vibrator = requireContext().getSystemService(android.content.Context.VIBRATOR_SERVICE) as? Vibrator
             vibrator?.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
         } catch (_: Exception) {}
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateBatchBadge()
     }
 
     override fun onDestroyView() {

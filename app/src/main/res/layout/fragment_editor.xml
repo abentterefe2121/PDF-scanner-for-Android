@@ -3,47 +3,56 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/background"
     android:padding="12dp">
 
-    <com.google.android.material.chip.ChipGroup
-        android:id="@+id/chip_filters"
+    <HorizontalScrollView
+        android:id="@+id/scroll_filters"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        app:selectionRequired="true"
-        app:singleSelection="true"
+        android:scrollbars="none"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent">
 
-        <com.google.android.material.chip.Chip
-            android:id="@+id/chip_original"
-            style="@style/Widget.Material3.Chip.Filter"
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/chip_filters"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/filter_original" />
+            app:selectionRequired="true"
+            app:singleLine="true"
+            app:singleSelection="true">
 
-        <com.google.android.material.chip.Chip
-            android:id="@+id/chip_magic"
-            style="@style/Widget.Material3.Chip.Filter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:checked="true"
-            android:text="@string/filter_magic" />
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_original"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/filter_original" />
 
-        <com.google.android.material.chip.Chip
-            android:id="@+id/chip_lighten"
-            style="@style/Widget.Material3.Chip.Filter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/filter_lighten" />
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_magic"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="@string/filter_magic" />
 
-        <com.google.android.material.chip.Chip
-            android:id="@+id/chip_bw"
-            style="@style/Widget.Material3.Chip.Filter"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/filter_bw" />
-    </com.google.android.material.chip.ChipGroup>
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_lighten"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/filter_lighten" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chip_bw"
+                style="@style/Widget.Material3.Chip.Filter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/filter_bw" />
+        </com.google.android.material.chip.ChipGroup>
+    </HorizontalScrollView>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_pages"
@@ -54,7 +63,7 @@
         app:layout_constraintBottom_toTopOf="@id/text_status"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/chip_filters" />
+        app:layout_constraintTop_toBottomOf="@id/scroll_filters" />
 
     <TextView
         android:id="@+id/text_status"
@@ -63,37 +72,72 @@
         android:gravity="center"
         android:paddingVertical="4dp"
         android:text=""
-        app:layout_constraintBottom_toTopOf="@id/button_add_page"
+        android:textAppearance="?attr/textAppearanceBodySmall"
+        android:textColor="@color/on_surface_variant"
+        app:layout_constraintBottom_toTopOf="@id/row_actions"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
 
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/button_add_page"
-        style="@style/Widget.Material3.Button.OutlinedButton"
+    <LinearLayout
+        android:id="@+id/row_actions"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:text="@string/add_page"
-        app:layout_constraintBottom_toTopOf="@id/button_done"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/button_done"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:text="@string/create_pdf"
+        android:orientation="horizontal"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent" />
+        app:layout_constraintStart_toStartOf="parent">
 
-    <ProgressBar
-        android:id="@+id/progress"
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_add_page"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
+            android:layout_weight="1"
+            android:text="@string/add_page" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_done"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.5"
+            android:text="@string/create_pdf" />
+    </LinearLayout>
+
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/card_progress"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:visibility="gone"
+        app:cardBackgroundColor="@color/surface_container"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="6dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
+        app:layout_constraintTop_toTopOf="parent"
+        app:strokeColor="@color/outline"
+        app:strokeWidth="1dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <ProgressBar
+                android:id="@+id/progress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+
+            <TextView
+                android:id="@+id/text_progress_msg"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/processing"
+                android:textColor="@color/on_surface" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
 </androidx.constraintlayout.widget.ConstraintLayout>

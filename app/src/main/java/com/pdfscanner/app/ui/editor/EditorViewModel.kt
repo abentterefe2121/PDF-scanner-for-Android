@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.pdfscanner.app.core.common.BitmapUtils
 import com.pdfscanner.app.core.common.DeviceTier
 import com.pdfscanner.app.core.common.ScanSession
+import com.pdfscanner.app.core.common.SettingsPrefs
 import com.pdfscanner.app.core.db.DocumentDao
 import com.pdfscanner.app.core.db.DocumentEntity
 import com.pdfscanner.app.core.ocr.HybridOcrEngine
@@ -20,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -36,7 +38,8 @@ class EditorViewModel @Inject constructor(
     private val packDownloader: OcrPackDownloader,
     private val pdfGenerator: PdfGenerator,
     private val dao: DocumentDao,
-    private val deviceTier: DeviceTier
+    private val deviceTier: DeviceTier,
+    private val prefs: SettingsPrefs
 ) : ViewModel() {
 
     private val _status = MutableStateFlow("")
@@ -54,11 +57,18 @@ class EditorViewModel @Inject constructor(
     private val _filter = MutableStateFlow(OpenCvHelper.Filter.MAGIC)
     val filter: StateFlow<OpenCvHelper.Filter> = _filter.asStateFlow()
 
+    init {
+        viewModelScope.launch {
+            _filter.value = prefs.defaultFilter.first()
+        }
+    }
+
     fun setFilter(f: OpenCvHelper.Filter) {
         if (_filter.value == f) return
         _filter.value = f
         viewModelScope.launch(Dispatchers.Default) {
             _isBusy.value = true
+            _status.value = "Applying ${f.name.lowercase()} filter…"
             try {
                 val dir = File(context.cacheDir, "scans")
                 val entries = ScanSession.pages
@@ -76,6 +86,7 @@ class EditorViewModel @Inject constructor(
                     BitmapUtils.safeRecycle(processed)
                 }
                 _pagesVersion.value += 1
+                _status.value = ""
             } finally {
                 _isBusy.value = false
             }
@@ -104,10 +115,14 @@ class EditorViewModel @Inject constructor(
                 p
             }
             if (newProcPath != null) {
-                ScanSession.updateProcessed(index, newProcPath, newRawPath)
+                ScanSession.updateProcessed(index, newProcPath, newRawPath, clearQuad = true)
                 _pagesVersion.value += 1
             }
         }
+    }
+
+    fun movePage(from: Int, to: Int) {
+        ScanSession.move(from, to)
     }
 
     fun deletePage(index: Int) {
@@ -122,7 +137,7 @@ class EditorViewModel @Inject constructor(
             _isBusy.value = true
             val pages = mutableListOf<PdfGenerator.Page>()
             try {
-                _status.value = "Preparing OCR…"
+                _status.value = "Preparing Amharic + English OCR…"
                 packDownloader.ensurePacks { msg -> _status.value = msg }
 
                 val allText = StringBuilder()
@@ -139,7 +154,7 @@ class EditorViewModel @Inject constructor(
                     pages.add(PdfGenerator.Page(bmp, result.text))
                 }
 
-                _status.value = "Creating PDF…"
+                _status.value = "Building searchable PDF…"
                 val pdfDir = File(context.filesDir, "pdfs").apply { mkdirs() }
                 val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val title = "Scan $stamp"

@@ -10,7 +10,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.pdfscanner.app.R
 import com.pdfscanner.app.core.vision.OpenCvHelper
 import com.pdfscanner.app.databinding.FragmentEditorBinding
@@ -36,11 +38,40 @@ class EditorFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         adapter = PageAdapter(
+            onCrop = { idx ->
+                val args = Bundle().apply {
+                    putInt("pageIndex", idx)
+                    putString("filter", viewModel.filter.value.name)
+                }
+                findNavController().navigate(R.id.action_editor_to_crop, args)
+            },
             onRotate = { idx -> viewModel.rotatePage(idx) },
             onDelete = { idx -> viewModel.deletePage(idx) }
         )
         binding.recyclerPages.layoutManager = LinearLayoutManager(requireContext())
         binding.recyclerPages.adapter = adapter
+
+        val touchHelper = ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
+            ItemTouchHelper.UP or ItemTouchHelper.DOWN, 0
+        ) {
+            override fun onMove(
+                rv: RecyclerView,
+                vh: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean {
+                @Suppress("DEPRECATION")
+                val from = vh.adapterPosition
+                @Suppress("DEPRECATION")
+                val to = target.adapterPosition
+                if (from == RecyclerView.NO_POSITION || to == RecyclerView.NO_POSITION) return false
+                viewModel.movePage(from, to)
+                adapter.notifyItemMoved(from, to)
+                return true
+            }
+
+            override fun onSwiped(vh: RecyclerView.ViewHolder, dir: Int) {}
+        })
+        touchHelper.attachToRecyclerView(binding.recyclerPages)
 
         binding.chipOriginal.setOnClickListener { viewModel.setFilter(OpenCvHelper.Filter.ORIGINAL) }
         binding.chipMagic.setOnClickListener { viewModel.setFilter(OpenCvHelper.Filter.MAGIC) }
@@ -54,7 +85,25 @@ class EditorFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { viewModel.status.collect { binding.textStatus.text = it } }
+                launch {
+                    viewModel.filter.collect { f ->
+                        val chipId = when (f) {
+                            OpenCvHelper.Filter.ORIGINAL -> R.id.chip_original
+                            OpenCvHelper.Filter.MAGIC -> R.id.chip_magic
+                            OpenCvHelper.Filter.LIGHTEN -> R.id.chip_lighten
+                            OpenCvHelper.Filter.BLACK_WHITE -> R.id.chip_bw
+                        }
+                        if (binding.chipFilters.checkedChipId != chipId) {
+                            binding.chipFilters.check(chipId)
+                        }
+                    }
+                }
+                launch {
+                    viewModel.status.collect { msg ->
+                        binding.textStatus.text = msg
+                        binding.textProgressMsg.text = msg.ifBlank { getString(R.string.processing) }
+                    }
+                }
                 launch {
                     viewModel.pagesVersion.collect {
                         adapter.notifyDataSetChanged()
@@ -62,7 +111,7 @@ class EditorFragment : Fragment() {
                 }
                 launch {
                     viewModel.isBusy.collect { busy ->
-                        binding.progress.visibility = if (busy) View.VISIBLE else View.GONE
+                        binding.cardProgress.visibility = if (busy) View.VISIBLE else View.GONE
                         binding.buttonDone.isEnabled = !busy
                         binding.buttonAddPage.isEnabled = !busy
                     }
@@ -76,6 +125,11 @@ class EditorFragment : Fragment() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        adapter.notifyDataSetChanged()
     }
 
     override fun onDestroyView() {

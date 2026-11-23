@@ -24,50 +24,126 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
 
+    <LinearLayout
+        android:id="@+id/top_controls"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="14dp"
+        android:layout_marginTop="14dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageButton
+            android:id="@+id/button_flash"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:background="@drawable/bg_pill_dark"
+            android:contentDescription="@string/flash"
+            android:padding="9dp"
+            android:src="@drawable/ic_flash"
+            app:tint="@android:color/white" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/button_auto_toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:background="@drawable/bg_pill_dark"
+            android:gravity="center"
+            android:paddingHorizontal="14dp"
+            android:text="@string/auto_capture_on"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <Space
+            android:layout_width="8dp"
+            android:layout_height="1dp" />
+
+        <TextView
+            android:id="@+id/button_batch_toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:background="@drawable/bg_pill_dark"
+            android:gravity="center"
+            android:paddingHorizontal="14dp"
+            android:text="@string/batch_off"
+            android:textColor="@android:color/white"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <TextView
         android:id="@+id/text_hint"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/bg_pill_dark"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="6dp"
         android:text="@string/align_document"
+        android:textAppearance="?attr/textAppearanceLabelLarge"
         android:textColor="@android:color/white"
-        android:textAppearance="?attr/textAppearanceTitleMedium"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        android:layout_marginTop="24dp" />
+        app:layout_constraintTop_toBottomOf="@id/top_controls" />
 
-    <ImageButton
-        android:id="@+id/button_flash"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:contentDescription="@string/flash"
-        android:src="@drawable/ic_flash"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        android:layout_margin="16dp" />
-
-    <ImageButton
-        android:id="@+id/button_gallery"
-        android:layout_width="48dp"
-        android:layout_height="48dp"
-        android:background="?attr/selectableItemBackgroundBorderless"
-        android:contentDescription="@string/import_gallery"
-        android:src="@drawable/ic_gallery"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_margin="24dp" />
-
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/button_capture"
-        android:layout_width="72dp"
-        android:layout_height="72dp"
-        android:backgroundTint="@android:color/white"
-        android:contentDescription="@string/capture"
-        android:text=""
-        app:cornerRadius="36dp"
+    <LinearLayout
+        android:id="@+id/bottom_dock"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:background="@color/scrim_dark"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingHorizontal="20dp"
+        android:paddingVertical="18dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintStart_toStartOf="parent"
-        android:layout_marginBottom="24dp" />
+        app:layout_constraintStart_toStartOf="parent">
+
+        <ImageButton
+            android:id="@+id/button_gallery"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:background="@drawable/bg_pill_dark"
+            android:contentDescription="@string/import_gallery"
+            android:padding="12dp"
+            android:src="@drawable/ic_gallery"
+            app:tint="@android:color/white" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <ImageButton
+            android:id="@+id/button_capture"
+            android:layout_width="74dp"
+            android:layout_height="74dp"
+            android:background="@drawable/bg_shutter"
+            android:contentDescription="@string/capture" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/button_done_batch"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:minWidth="88dp"
+            android:text="@string/done_pages"
+            android:textColor="@color/on_primary"
+            android:visibility="invisible"
+            app:backgroundTint="@color/primary"
+            app:cornerRadius="22dp" />
+    </LinearLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

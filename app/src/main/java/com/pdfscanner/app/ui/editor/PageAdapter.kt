@@ -9,6 +9,7 @@ import com.pdfscanner.app.databinding.ItemPageBinding
 import java.io.File
 
 class PageAdapter(
+    private val onCrop: (Int) -> Unit,
     private val onRotate: (Int) -> Unit,
     private val onDelete: (Int) -> Unit
 ) : RecyclerView.Adapter<PageAdapter.VH>() {
@@ -28,10 +29,15 @@ class PageAdapter(
         fun bind(position: Int) {
             val path = ScanSession.paths.getOrNull(position) ?: return
             binding.imagePage.load(File(path)) {
-                size(600, 800)
+                size(720, 960)
                 crossfade(true)
             }
             binding.textPageNum.text = (position + 1).toString()
+            binding.buttonCrop.setOnClickListener {
+                @Suppress("DEPRECATION")
+                val pos = adapterPosition
+                if (pos != RecyclerView.NO_POSITION) onCrop(pos)
+            }
             binding.buttonRotate.setOnClickListener {
                 @Suppress("DEPRECATION")
                 val pos = adapterPosition
