@@ -184,9 +184,10 @@ class EditorViewModel @Inject constructor(
 
                 tessSession = withContext(Dispatchers.Default) { ocr.openTesseractSession() }
                 val allText = StringBuilder()
+                val allCsv = StringBuilder()
                 val paths = ScanSession.paths
                 for ((i, path) in paths.withIndex()) {
-                    _status.value = "OCR page ${i + 1}/${paths.size}…"
+                    _status.value = "OCR & layout page ${i + 1}/${paths.size}…"
                     val bmp = withContext(Dispatchers.Default) {
                         BitmapUtils.decodeSampledFile(path, deviceTier.maxProcessingEdge)
                     } ?: continue
@@ -196,7 +197,18 @@ class EditorViewModel @Inject constructor(
                     if (result.text.isNotBlank()) {
                         allText.append(result.text).append("\n\n")
                     }
-                    pages.add(PdfGenerator.Page(bmp, result.text))
+                    if (result.csvText.isNotBlank()) {
+                        allCsv.append(result.csvText).append("\n\n")
+                    }
+                    pages.add(
+                        PdfGenerator.Page(
+                            bitmap = bmp,
+                            ocrText = result.text,
+                            words = result.words,
+                            sourceWidth = result.imageWidth.takeIf { it > 0 } ?: bmp.width,
+                            sourceHeight = result.imageHeight.takeIf { it > 0 } ?: bmp.height
+                        )
+                    )
                 }
 
                 _status.value = "Building searchable PDF…"
@@ -215,7 +227,8 @@ class EditorViewModel @Inject constructor(
                                 title = title,
                                 pdfPath = generated.absolutePath,
                                 pageCount = pages.size,
-                                ocrText = allText.toString().take(50_000),
+                                ocrText = allText.toString().trim().take(50_000),
+                                tableCsv = allCsv.toString().trim().take(50_000),
                                 folder = folder
                             )
                         )

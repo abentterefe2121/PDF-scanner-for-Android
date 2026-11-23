@@ -14,6 +14,7 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.pdfscanner.app.core.common.BitmapUtils
 import com.pdfscanner.app.core.common.DeviceTier
+import com.pdfscanner.app.core.ocr.OcrWord
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -22,10 +23,10 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Searchable PDF generator using framework PdfDocument (no heavy iText/PdfBox).
- * - Scales & JPEG-compresses page bitmaps to target <300 KB/page for fast Telegram/WhatsApp sharing.
- * - Embeds invisible OCR text layer using bundled NotoSansEthiopic-Regular.ttf.
- * - Supports merging multiple PDFs into a single document.
+ * Searchable PDF generator using framework PdfDocument:
+ * - Scales & JPEG-compresses page bitmaps to target <300 KB/page.
+ * - Places every OCR word at its EXACT spatial (x, y, height) bounding box with NotoSansEthiopic
+ *   so PDF selection, copy, and table row order work natively in external PDF viewers.
  */
 @Singleton
 class PdfGenerator @Inject constructor(
@@ -34,7 +35,13 @@ class PdfGenerator @Inject constructor(
 ) {
     companion object { private const val TAG = "PdfGenerator" }
 
-    data class Page(val bitmap: Bitmap, val ocrText: String = "")
+    data class Page(
+        val bitmap: Bitmap,
+        val ocrText: String = "",
+        val words: List<OcrWord> = emptyList(),
+        val sourceWidth: Int = bitmap.width,
+        val sourceHeight: Int = bitmap.height
+    )
 
     fun generate(pages: List<Page>, outputFile: File, title: String = "Scanned Document"): File? {
         if (pages.isEmpty()) return null
@@ -68,18 +75,29 @@ class PdfGenerator @Inject constructor(
                     BitmapUtils.safeRecycle(compressed)
                 }
 
-                if (page.ocrText.isNotBlank()) {
-                    val paint = Paint().apply {
-                        typeface = ethiopicTypeface
-                        textSize = 8f
-                        alpha = 0
+                // Spatial invisible OCR text layer (word-by-word bounding box placement!)
+                val textPaint = Paint().apply {
+                    typeface = ethiopicTypeface
+                    alpha = 0
+                }
+                if (page.words.isNotEmpty() && page.sourceWidth > 0 && page.sourceHeight > 0) {
+                    val sx = drawW / page.sourceWidth.toFloat()
+                    val sy = drawH / page.sourceHeight.toFloat()
+                    for (w in page.words) {
+                        val px = left + w.box.left * sx
+                        val py = top + w.box.bottom * sy
+                        val h = (w.box.height * sy).coerceIn(5f, 28f)
+                        textPaint.textSize = h * 0.85f
+                        canvas.drawText(w.text, px, py, textPaint)
                     }
+                } else if (page.ocrText.isNotBlank()) {
+                    textPaint.textSize = 8f
                     val lines = page.ocrText.lines().take(60)
                     var y = top + 12f
                     for (line in lines) {
                         if (y > top + drawH) break
                         if (line.isNotBlank()) {
-                            canvas.drawText(line.take(120), left + 4f, y, paint)
+                            canvas.drawText(line.take(120), left + 4f, y, textPaint)
                         }
                         y += 12f
                     }
@@ -102,9 +120,6 @@ class PdfGenerator @Inject constructor(
         }
     }
 
-    /**
-     * Merges multiple existing PDFs into [outputFile]. Returns total page count, or 0 on failure.
-     */
     fun mergePdfs(sources: List<File>, outputFile: File): Int {
         if (sources.isEmpty()) return 0
         val document = PdfDocument()
@@ -163,10 +178,6 @@ class PdfGenerator @Inject constructor(
         }
     }
 
-    /**
-     * Scales to ~150 DPI A4 max (1400px) and re-encodes via JPEG so framework PdfDocument
-     * stores compact compressed streams (~150-300 KB/page) instead of huge uncompressed bitmaps.
-     */
     private fun compressForPdf(src: Bitmap): Bitmap? {
         return try {
             val targetMax = minOf(deviceTier.maxProcessingEdge, 1400)

@@ -114,6 +114,7 @@ class HomeViewModel @Inject constructor(
                     pdfPath = dest.absolutePath,
                     pageCount = doc.pageCount,
                     ocrText = doc.ocrText,
+                    tableCsv = doc.tableCsv,
                     folder = doc.folder
                 )
             )

@@ -4,6 +4,8 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.method.ScrollingMovementMethod
 import android.view.LayoutInflater
@@ -11,8 +13,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.PopupMenu
+import android.widget.TableRow
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.Lifecycle
@@ -44,6 +49,7 @@ class ViewerFragment : Fragment() {
     private var totalPages = 1
     private var pdfFile: File? = null
     private var currentDoc: DocumentEntity? = null
+    private var showingTable = false
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -79,12 +85,25 @@ class ViewerFragment : Fragment() {
                     getString(R.string.no_text_found)
                 }
 
+                val hasTable = doc.tableCsv.isNotBlank()
+                binding.buttonToggleTable.visibility = if (hasTable) View.VISIBLE else View.GONE
+                binding.buttonCopyCsv.visibility = if (hasTable) View.VISIBLE else View.GONE
+                if (hasTable) {
+                    populateTable(doc.tableCsv)
+                    setTableVisible(true)
+                }
+
+                binding.buttonToggleTable.setOnClickListener {
+                    setTableVisible(!showingTable)
+                }
+
+                binding.buttonCopyCsv.setOnClickListener {
+                    copyToClipboard("CSV Table", doc.tableCsv, getString(R.string.copied_csv))
+                }
+
                 binding.buttonCopyText.setOnClickListener {
-                    val text = doc.ocrText
-                    if (text.isNotBlank()) {
-                        val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("OCR Text", text))
-                        Toast.makeText(requireContext(), getString(R.string.copied), Toast.LENGTH_SHORT).show()
+                    if (doc.ocrText.isNotBlank()) {
+                        copyToClipboard("OCR Text", doc.ocrText, getString(R.string.copied))
                     }
                 }
 
@@ -106,11 +125,91 @@ class ViewerFragment : Fragment() {
         }
     }
 
+    private fun setTableVisible(show: Boolean) {
+        showingTable = show
+        binding.scrollTable.visibility = if (show) View.VISIBLE else View.GONE
+        binding.textOcr.visibility = if (show) View.GONE else View.VISIBLE
+        binding.buttonToggleTable.text = getString(if (show) R.string.view_text else R.string.view_table)
+    }
+
+    private fun populateTable(csv: String) {
+        val table = binding.tableOcr
+        table.removeAllViews()
+        val ctx = requireContext()
+        val borderColor = ContextCompat.getColor(ctx, R.color.outline)
+        val textColor = ContextCompat.getColor(ctx, R.color.on_surface)
+        val headerBg = ContextCompat.getColor(ctx, R.color.surface_variant)
+        val padH = (10 * resources.displayMetrics.density).toInt()
+        val padV = (6 * resources.displayMetrics.density).toInt()
+
+        val lines = csv.lines().filter { it.isNotBlank() }
+        for ((rowIdx, line) in lines.withIndex()) {
+            val row = TableRow(ctx)
+            val cells = parseCsvRow(line)
+            for (cell in cells) {
+                val tv = TextView(ctx).apply {
+                    text = cell
+                    setTextColor(textColor)
+                    textSize = 12f
+                    if (rowIdx == 0) setTypeface(null, Typeface.BOLD)
+                    setPadding(padH, padV, padH, padV)
+                    background = GradientDrawable().apply {
+                        if (rowIdx == 0) setColor(headerBg)
+                        setStroke(1, borderColor)
+                    }
+                }
+                row.addView(tv)
+            }
+            table.addView(row)
+        }
+    }
+
+    private fun parseCsvRow(line: String): List<String> {
+        val cells = mutableListOf<String>()
+        val cur = StringBuilder()
+        var inQuotes = false
+        var i = 0
+        while (i < line.length) {
+            val c = line[i]
+            if (inQuotes) {
+                if (c == '"' && i + 1 < line.length && line[i + 1] == '"') {
+                    cur.append('"')
+                    i++
+                } else if (c == '"') {
+                    inQuotes = false
+                } else {
+                    cur.append(c)
+                }
+            } else {
+                when (c) {
+                    '"' -> inQuotes = true
+                    ',' -> {
+                        cells.add(cur.toString())
+                        cur.clear()
+                    }
+                    else -> cur.append(c)
+                }
+            }
+            i++
+        }
+        cells.add(cur.toString())
+        return cells
+    }
+
+    private fun copyToClipboard(label: String, content: String, toastMsg: String) {
+        val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText(label, content))
+        Toast.makeText(requireContext(), toastMsg, Toast.LENGTH_SHORT).show()
+    }
+
     private fun showMoreMenu(doc: DocumentEntity, file: File, anchor: View) {
         val popup = PopupMenu(requireContext(), anchor)
         popup.menu.add(0, 1, 0, getString(R.string.rename))
         popup.menu.add(0, 2, 1, getString(R.string.move_folder))
-        popup.menu.add(0, 3, 2, getString(R.string.delete))
+        if (doc.tableCsv.isNotBlank()) {
+            popup.menu.add(0, 4, 2, getString(R.string.export_csv))
+        }
+        popup.menu.add(0, 3, 3, getString(R.string.delete))
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> {
@@ -144,6 +243,7 @@ class ViewerFragment : Fragment() {
                         }
                         .show()
                 }
+                4 -> shareCsv(doc)
                 3 -> {
                     MaterialAlertDialogBuilder(requireContext())
                         .setTitle(R.string.delete)
@@ -164,6 +264,26 @@ class ViewerFragment : Fragment() {
             true
         }
         popup.show()
+    }
+
+    private fun shareCsv(doc: DocumentEntity) {
+        try {
+            val csvFile = File(requireContext().cacheDir, "${doc.title.replace(Regex("[^A-Za-z0-9_-]"), "_")}.csv")
+            csvFile.writeText(doc.tableCsv)
+            val uri = FileProvider.getUriForFile(
+                requireContext(),
+                requireContext().packageName + ".fileprovider",
+                csvFile
+            )
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/csv"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, getString(R.string.export_csv)))
+        } catch (e: Exception) {
+            Toast.makeText(requireContext(), "Export failed: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun renderCurrentPage() {

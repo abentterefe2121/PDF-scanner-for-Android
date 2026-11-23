@@ -26,6 +26,7 @@ data class DocumentEntity(
     val pdfPath: String,
     val pageCount: Int,
     val ocrText: String = "",
+    val tableCsv: String = "",
     val folder: String = "Inbox",
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
@@ -96,7 +97,7 @@ interface DocumentDao {
 
 @Database(
     entities = [DocumentEntity::class, DocumentFtsEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

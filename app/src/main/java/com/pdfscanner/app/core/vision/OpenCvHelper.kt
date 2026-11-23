@@ -5,6 +5,7 @@ import android.graphics.PointF
 import android.util.Log
 import com.pdfscanner.app.core.common.BitmapUtils
 import com.pdfscanner.app.core.common.DeviceTier
+import com.pdfscanner.app.core.ocr.TableExtractor
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -336,6 +337,151 @@ class OpenCvHelper @Inject constructor(
         drawCard(front, pageH * 0.30f)
         drawCard(back, pageH * 0.70f)
         return out
+    }
+
+    /**
+     * Clean grayscale illumination-normalized bitmap for OCR so shadows/glare do not cause
+     * stray Amharic character hallucinations on English/numeric documents.
+     */
+    fun prepareForOcr(source: Bitmap): Bitmap {
+        if (!ensureLoaded()) return source
+        var mat: Mat? = null
+        var gray: Mat? = null
+        var bg: Mat? = null
+        var div: Mat? = null
+        var claheMat: Mat? = null
+        var rgba: Mat? = null
+        var tempCopy: Bitmap? = null
+        return try {
+            val argb = if (source.config == Bitmap.Config.ARGB_8888) {
+                source
+            } else {
+                source.copy(Bitmap.Config.ARGB_8888, false).also { tempCopy = it }
+            }
+            mat = Mat()
+            Utils.bitmapToMat(argb, mat)
+            gray = Mat()
+            Imgproc.cvtColor(mat, gray, Imgproc.COLOR_RGBA2GRAY)
+            bg = Mat()
+            Imgproc.GaussianBlur(gray, bg, Size(0.0, 0.0), 45.0)
+            div = Mat()
+            Core.divide(gray, bg, div, 255.0, CvType.CV_8UC1)
+            claheMat = Mat()
+            Imgproc.createCLAHE(1.6, Size(8.0, 8.0)).apply(div, claheMat)
+            rgba = Mat()
+            Imgproc.cvtColor(claheMat, rgba, Imgproc.COLOR_GRAY2RGBA)
+            val result = Bitmap.createBitmap(rgba.cols(), rgba.rows(), Bitmap.Config.ARGB_8888)
+            Utils.matToBitmap(rgba, result)
+            result
+        } catch (_: Exception) {
+            source
+        } finally {
+            try { mat?.release() } catch (_: Exception) {}
+            try { gray?.release() } catch (_: Exception) {}
+            try { bg?.release() } catch (_: Exception) {}
+            try { div?.release() } catch (_: Exception) {}
+            try { claheMat?.release() } catch (_: Exception) {}
+            try { rgba?.release() } catch (_: Exception) {}
+            try { tempCopy?.recycle() } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Detects physical horizontal and vertical table grid lines via morphological extraction.
+     * Returns sorted row Y-boundaries and column X-boundaries when a table (>=2x2 cells) exists.
+     */
+    fun detectTableGrid(source: Bitmap): TableExtractor.GridLines? {
+        if (!ensureLoaded()) return null
+        var mat: Mat? = null
+        var gray: Mat? = null
+        var bw: Mat? = null
+        var hLines: Mat? = null
+        var vLines: Mat? = null
+        var hKernel: Mat? = null
+        var vKernel: Mat? = null
+        var tempCopy: Bitmap? = null
+        return try {
+            val argb = if (source.config == Bitmap.Config.ARGB_8888) {
+                source
+            } else {
+                source.copy(Bitmap.Config.ARGB_8888, false).also { tempCopy = it }
+            }
+            mat = Mat()
+            Utils.bitmapToMat(argb, mat)
+            gray = Mat()
+            Imgproc.cvtColor(mat, gray, Imgproc.COLOR_RGBA2GRAY)
+            bw = Mat()
+            Imgproc.adaptiveThreshold(
+                gray, bw, 255.0,
+                Imgproc.ADAPTIVE_THRESH_MEAN_C, Imgproc.THRESH_BINARY_INV, 25, 10.0
+            )
+
+            val hLen = max(source.width / 18, 25)
+            val vLen = max(source.height / 18, 25)
+            hKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(hLen.toDouble(), 1.0))
+            vKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(1.0, vLen.toDouble()))
+
+            hLines = Mat()
+            Imgproc.erode(bw, hLines, hKernel)
+            Imgproc.dilate(hLines, hLines, hKernel)
+
+            vLines = Mat()
+            Imgproc.erode(bw, vLines, vKernel)
+            Imgproc.dilate(vLines, vLines, vKernel)
+
+            val rowYs = extractLinePositions(hLines, horizontal = true, minSpan = source.width * 0.25)
+            val colXs = extractLinePositions(vLines, horizontal = false, minSpan = source.height * 0.20)
+            if (rowYs.size >= 3 && colXs.size >= 3) {
+                TableExtractor.GridLines(rowYs, colXs)
+            } else null
+        } catch (e: Exception) {
+            Log.w(TAG, "detectTableGrid failed: ${e.message}")
+            null
+        } finally {
+            try { mat?.release() } catch (_: Exception) {}
+            try { gray?.release() } catch (_: Exception) {}
+            try { bw?.release() } catch (_: Exception) {}
+            try { hLines?.release() } catch (_: Exception) {}
+            try { vLines?.release() } catch (_: Exception) {}
+            try { hKernel?.release() } catch (_: Exception) {}
+            try { vKernel?.release() } catch (_: Exception) {}
+            try { tempCopy?.recycle() } catch (_: Exception) {}
+        }
+    }
+
+    private fun extractLinePositions(lineMask: Mat, horizontal: Boolean, minSpan: Double): List<Int> {
+        val proj = Mat()
+        return try {
+            val dim = if (horizontal) 1 else 0
+            Core.reduce(lineMask, proj, dim, Core.REDUCE_SUM, CvType.CV_32S)
+            val len = if (horizontal) proj.rows() else proj.cols()
+            val buf = IntArray(len)
+            proj.get(0, 0, buf)
+            val threshold = (minSpan * 255.0).toInt()
+            val rawPositions = mutableListOf<Int>()
+            for (i in 0 until len) {
+                if (buf[i] >= threshold) rawPositions.add(i)
+            }
+            if (rawPositions.isEmpty()) return emptyList()
+            val clustered = mutableListOf<Int>()
+            var groupStart = rawPositions[0]
+            var groupPrev = rawPositions[0]
+            val gapTol = 12
+            for (i in 1 until rawPositions.size) {
+                val p = rawPositions[i]
+                if (p - groupPrev <= gapTol) {
+                    groupPrev = p
+                } else {
+                    clustered.add((groupStart + groupPrev) / 2)
+                    groupStart = p
+                    groupPrev = p
+                }
+            }
+            clustered.add((groupStart + groupPrev) / 2)
+            clustered
+        } finally {
+            proj.release()
+        }
     }
 
     /** Sharpness (Laplacian variance). Higher = sharper. Threshold ~80-100 for auto-capture. */

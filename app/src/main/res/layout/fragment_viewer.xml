@@ -31,7 +31,7 @@
         android:id="@+id/layout_pager"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="4dp"
         android:gravity="center"
         android:orientation="horizontal"
         app:layout_constraintBottom_toTopOf="@id/card_ocr"
@@ -66,7 +66,7 @@
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/card_ocr"
         android:layout_width="0dp"
-        android:layout_height="140dp"
+        android:layout_height="175dp"
         android:layout_marginBottom="10dp"
         app:cardBackgroundColor="@color/surface_container"
         app:cardCornerRadius="14dp"
@@ -98,10 +98,26 @@
                     android:textColor="@color/on_surface" />
 
                 <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_toggle_table"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="@string/view_table"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_copy_csv"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="34dp"
+                    android:text="@string/copy_csv"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
                     android:id="@+id/button_copy_text"
                     style="@style/Widget.Material3.Button.TextButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
+                    android:layout_height="34dp"
                     android:text="@string/copy_text"
                     app:icon="@drawable/ic_copy" />
             </LinearLayout>
@@ -116,6 +132,26 @@
                 android:textAppearance="?attr/textAppearanceBodySmall"
                 android:textColor="@color/on_surface_variant"
                 android:textIsSelectable="true" />
+
+            <ScrollView
+                android:id="@+id/scroll_table"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_marginTop="4dp"
+                android:layout_weight="1"
+                android:visibility="gone">
+
+                <HorizontalScrollView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content">
+
+                    <TableLayout
+                        android:id="@+id/table_ocr"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:stretchColumns="*" />
+                </HorizontalScrollView>
+            </ScrollView>
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 

@@ -2,6 +2,10 @@ package com.pdfscanner.app.ui.scanner
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -23,6 +27,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.mlkit.vision.barcode.BarcodeScanning
+import com.google.mlkit.vision.common.InputImage
 import com.pdfscanner.app.R
 import com.pdfscanner.app.core.camera.CameraManager
 import com.pdfscanner.app.core.common.BitmapUtils
@@ -33,12 +40,15 @@ import com.pdfscanner.app.databinding.FragmentScannerBinding
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
 @AndroidEntryPoint
 class ScannerFragment : Fragment() {
+
+    private enum class ScanMode { DOC, ID_CARD, QR }
 
     private var _binding: FragmentScannerBinding? = null
     private val binding get() = _binding!!
@@ -49,7 +59,7 @@ class ScannerFragment : Fragment() {
 
     private var isCapturing = false
     private var lastQuadResult: ScannerViewModel.QuadResult? = null
-    private var isIdCardMode = false
+    private var scanMode = ScanMode.DOC
     private var pendingIdFront: Bitmap? = null
 
     private val permissionLauncher = registerForActivityResult(
@@ -96,8 +106,9 @@ class ScannerFragment : Fragment() {
             }
         }
 
-        binding.modeDoc.setOnClickListener { setScanMode(false) }
-        binding.modeIdCard.setOnClickListener { setScanMode(true) }
+        binding.modeDoc.setOnClickListener { setScanMode(ScanMode.DOC) }
+        binding.modeIdCard.setOnClickListener { setScanMode(ScanMode.ID_CARD) }
+        binding.modeQr.setOnClickListener { setScanMode(ScanMode.QR) }
 
         binding.edgeOverlay.setOnTouchListener { _, event ->
             if (event.action == MotionEvent.ACTION_UP) {
@@ -109,20 +120,20 @@ class ScannerFragment : Fragment() {
 
         updateBatchBadge()
         updateTorchUi(false)
-        setScanMode(false)
+        setScanMode(ScanMode.DOC)
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.quad.collect { qr ->
                         lastQuadResult = qr
-                        updateOverlay(qr)
+                        updateOverlay(if (scanMode == ScanMode.QR) null else qr)
                     }
                 }
                 launch {
                     viewModel.isStable.collect { stable ->
                         binding.edgeOverlay.isStable = stable
-                        if (!isCapturing && !isIdCardMode) {
+                        if (!isCapturing && scanMode == ScanMode.DOC) {
                             binding.textHint.text = getString(
                                 if (stable) R.string.hold_steady else R.string.align_document
                             )
@@ -145,7 +156,7 @@ class ScannerFragment : Fragment() {
                 }
                 launch {
                     viewModel.captureEvent.collect {
-                        if (!isIdCardMode) {
+                        if (scanMode == ScanMode.DOC) {
                             vibrate()
                             capture()
                         }
@@ -164,15 +175,20 @@ class ScannerFragment : Fragment() {
         }
     }
 
-    private fun setScanMode(idCard: Boolean) {
-        isIdCardMode = idCard
+    private fun setScanMode(mode: ScanMode) {
+        scanMode = mode
         BitmapUtils.safeRecycle(pendingIdFront)
         pendingIdFront = null
         val activeColor = ContextCompat.getColor(requireContext(), R.color.edge_ready)
-        binding.modeDoc.setTextColor(if (!idCard) activeColor else Color.WHITE)
-        binding.modeIdCard.setTextColor(if (idCard) activeColor else Color.WHITE)
+        binding.modeDoc.setTextColor(if (mode == ScanMode.DOC) activeColor else Color.WHITE)
+        binding.modeIdCard.setTextColor(if (mode == ScanMode.ID_CARD) activeColor else Color.WHITE)
+        binding.modeQr.setTextColor(if (mode == ScanMode.QR) activeColor else Color.WHITE)
         binding.textHint.text = getString(
-            if (idCard) R.string.scan_id_front else R.string.align_document
+            when (mode) {
+                ScanMode.DOC -> R.string.align_document
+                ScanMode.ID_CARD -> R.string.scan_id_front
+                ScanMode.QR -> R.string.qr_hint
+            }
         )
     }
 
@@ -216,7 +232,7 @@ class ScannerFragment : Fragment() {
         try {
             cameraManager.onFrame = { frame -> viewModel.onFrame(frame) }
             cameraManager.start(viewLifecycleOwner, binding.previewView) {
-                if (_binding != null && !isIdCardMode) {
+                if (_binding != null && scanMode == ScanMode.DOC) {
                     binding.textHint.text = getString(R.string.align_document)
                 }
             }
@@ -241,6 +257,10 @@ class ScannerFragment : Fragment() {
             var processed: Bitmap? = null
             try {
                 raw = cameraManager.takePicture()
+                if (scanMode == ScanMode.QR) {
+                    scanQrFromBitmap(raw)
+                    return@launch
+                }
                 processed = viewModel.openCv.processPage(
                     raw,
                     viewModel.filter.value,
@@ -259,10 +279,46 @@ class ScannerFragment : Fragment() {
                 }
             } finally {
                 BitmapUtils.safeRecycle(raw)
-                // Only recycle processed if it wasn't retained as pendingIdFront
                 if (processed !== pendingIdFront) {
                     BitmapUtils.safeRecycle(processed)
                 }
+            }
+        }
+    }
+
+    private suspend fun scanQrFromBitmap(bmp: Bitmap) {
+        val scanner = BarcodeScanning.getClient()
+        val value = try {
+            val barcodes = scanner.process(InputImage.fromBitmap(bmp, 0)).await()
+            barcodes.firstOrNull()?.rawValue
+        } catch (_: Exception) {
+            null
+        } finally {
+            scanner.close()
+        }
+        withContext(Dispatchers.Main) {
+            isCapturing = false
+            if (_binding == null) return@withContext
+            binding.textHint.text = getString(R.string.qr_hint)
+            if (value.isNullOrBlank()) {
+                Toast.makeText(requireContext(), getString(R.string.no_text_found), Toast.LENGTH_SHORT).show()
+            } else {
+                vibrate()
+                val dialog = MaterialAlertDialogBuilder(requireContext())
+                    .setTitle(R.string.qr_found)
+                    .setMessage(value)
+                    .setPositiveButton(R.string.copy_text) { _, _ ->
+                        val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("QR", value))
+                        Toast.makeText(requireContext(), getString(R.string.copied), Toast.LENGTH_SHORT).show()
+                    }
+                    .setNegativeButton(R.string.cancel, null)
+                if (value.startsWith("http://") || value.startsWith("https://")) {
+                    dialog.setNeutralButton("Open") { _, _ ->
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(value)))
+                    }
+                }
+                dialog.show()
             }
         }
     }
@@ -277,6 +333,10 @@ class ScannerFragment : Fragment() {
                     uri,
                     deviceTier.maxProcessingEdge
                 ) ?: return@launch
+                if (scanMode == ScanMode.QR) {
+                    scanQrFromBitmap(bmp)
+                    return@launch
+                }
                 val detected = viewModel.openCv.detectDocumentQuad(bmp)
                 processed = viewModel.openCv.processPage(
                     bmp,
@@ -309,7 +369,7 @@ class ScannerFragment : Fragment() {
         quadH: Int
     ) {
         val dir = File(requireContext().cacheDir, "scans")
-        if (isIdCardMode) {
+        if (scanMode == ScanMode.ID_CARD) {
             val front = pendingIdFront
             if (front == null) {
                 pendingIdFront = processed

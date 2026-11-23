@@ -22,7 +22,15 @@
     <string name="viewer">Document</string>
     <string name="share">Share PDF</string>
     <string name="copy_text">Copy Text</string>
+    <string name="copy_csv">Copy CSV</string>
     <string name="copied">Text copied</string>
+    <string name="copied_csv">CSV table copied</string>
+    <string name="view_text">Text</string>
+    <string name="view_table">Table</string>
+    <string name="export_csv">Export CSV</string>
+    <string name="mode_qr">QR / Barcode</string>
+    <string name="qr_hint">Point at QR code or barcode</string>
+    <string name="qr_found">QR / Barcode Result</string>
     <string name="rename">Rename</string>
     <string name="duplicate">Duplicate</string>
     <string name="move_folder">Move to Folder</string>
