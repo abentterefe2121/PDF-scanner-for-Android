@@ -54,7 +54,7 @@ class TesseractOcrEngine @Inject constructor(
             api.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
             api.setVariable("preserve_interword_spaces", "1")
             api.setImage(bitmap)
-            val raw = api.utf8Text ?: ""
+            val raw = api.getUTF8Text() ?: ""
             val normalized = Normalizer.normalize(raw, Normalizer.Form.NFC).trim()
             OcrResult(
                 text = normalized,

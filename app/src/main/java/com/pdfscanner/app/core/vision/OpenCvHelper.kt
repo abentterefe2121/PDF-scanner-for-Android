@@ -9,6 +9,7 @@ import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
 import org.opencv.core.Mat
+import org.opencv.core.MatOfDouble
 import org.opencv.core.MatOfPoint
 import org.opencv.core.MatOfPoint2f
 import org.opencv.core.Point
@@ -258,6 +259,8 @@ class OpenCvHelper @Inject constructor(
         var mat: Mat? = null
         var gray: Mat? = null
         var lap: Mat? = null
+        var mean: MatOfDouble? = null
+        var stddev: MatOfDouble? = null
         var tempCopy: Bitmap? = null
         return try {
             val src = if (frame.config == Bitmap.Config.ARGB_8888) {
@@ -271,8 +274,10 @@ class OpenCvHelper @Inject constructor(
             Imgproc.cvtColor(mat, gray, Imgproc.COLOR_RGBA2GRAY)
             lap = Mat()
             Imgproc.Laplacian(gray, lap, CvType.CV_64F)
-            val meanStd = Core.meanStdDev(lap)
-            val std = meanStd.`val`[1]
+            mean = MatOfDouble()
+            stddev = MatOfDouble()
+            Core.meanStdDev(lap, mean, stddev)
+            val std = stddev.get(0, 0)[0]
             std * std
         } catch (_: Exception) {
             0.0
@@ -280,6 +285,8 @@ class OpenCvHelper @Inject constructor(
             try { mat?.release() } catch (_: Exception) {}
             try { gray?.release() } catch (_: Exception) {}
             try { lap?.release() } catch (_: Exception) {}
+            try { mean?.release() } catch (_: Exception) {}
+            try { stddev?.release() } catch (_: Exception) {}
             try { tempCopy?.recycle() } catch (_: Exception) {}
         }
     }

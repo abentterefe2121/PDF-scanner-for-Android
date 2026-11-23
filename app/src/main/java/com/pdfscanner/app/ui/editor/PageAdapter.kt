@@ -33,11 +33,13 @@ class PageAdapter(
             }
             binding.textPageNum.text = (position + 1).toString()
             binding.buttonRotate.setOnClickListener {
-                val pos = bindingAdapterPosition
+                @Suppress("DEPRECATION")
+                val pos = adapterPosition
                 if (pos != RecyclerView.NO_POSITION) onRotate(pos)
             }
             binding.buttonDelete.setOnClickListener {
-                val pos = bindingAdapterPosition
+                @Suppress("DEPRECATION")
+                val pos = adapterPosition
                 if (pos != RecyclerView.NO_POSITION) onDelete(pos)
             }
         }
