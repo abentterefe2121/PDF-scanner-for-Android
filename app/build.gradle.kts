@@ -7,12 +7,12 @@ plugins {
 
 android {
     namespace = "com.pdfscanner.app"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.pdfscanner.app"
         minSdk = 26 // Android 8.0 — broad low-end reach (Tecno/Infinix/Samsung A)
-        targetSdk = 36 // Android 16
+        targetSdk = 36 // Android 16 (user's target device)
         versionCode = 1
         versionName = "1.0.0"
 
